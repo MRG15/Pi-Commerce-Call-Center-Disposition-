@@ -1,0 +1,16 @@
+{
+  "calculated_directly_from_uploaded_workbook": true,
+  "authoritative_sheets": [
+    "Highly interested cx (Umesh)",
+    "Highly interested cx (Sheena)",
+    "Highly Interested CX (Ashish)"
+  ],
+  "unique_customers": 1039,
+  "standard_historical_calls": 1651,
+  "legacy_followups": 233,
+  "total_historical_interactions": 1884,
+  "cross_sheet_overlap_customers": 21,
+  "standard_calls_with_status": 953,
+  "standard_calls_without_status": 698,
+  "note": "The included source:report script recalculates this from the workbook and is the runtime source of truth. The earlier Claude artifact reported 1,030 unique customers; direct workbook inspection here found 1,039. Migration validation deliberately recalculates rather than hard-coding either figure."
+}

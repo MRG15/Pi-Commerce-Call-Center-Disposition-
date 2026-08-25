@@ -1,0 +1,12 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function Analytics(){
+  const router=useRouter(); const [date,setDate]=useState(new Date().toISOString().slice(0,10)); const [data,setData]=useState<any>(null); const [agent,setAgent]=useState<any>(null);
+  useEffect(()=>{(async()=>{const m=await fetch('/api/auth/me');if(!m.ok){router.replace('/login');return;}const a=(await m.json()).agent;setAgent(a);if(a.role!=='admin'){router.replace('/');return;}load(date);})();},[]);
+  async function load(d:string){const r=await fetch('/api/analytics/daily?date='+d);if(r.ok)setData(await r.json());}
+  if(!agent)return <div className="center">Loading…</div>;
+  return <div className="app-shell"><header><div><strong>Pi Commerce</strong><span> · Daily Analytics</span></div><div className="header-actions"><a href="/">Agent Console</a><span className="badge">{agent.name}</span></div></header><main><section className="card"><div className="section-label">Daily Snapshot</div><div className="date-row"><input type="date" value={date} onChange={e=>{setDate(e.target.value);load(e.target.value)}}/></div>{data&&<><div className="kpis"><div><b>{data.totalAttempts}</b><span>Total Attempts</span></div><div><b>{data.uniqueAttempted}</b><span>Unique Attempted</span></div><div><b>{data.freshCustomers}</b><span>Fresh Customers</span></div><div><b>{data.repeatCustomers}</b><span>Repeat Customers</span></div><div><b>{data.connectRateKnownDenominator==null?'—':data.connectRateKnownDenominator+'%'}</b><span>Connect Rate*</span></div></div><div className="note">* Uses only outcomes that can be confidently classified as connected/not connected. Unknown historical outcomes are excluded.</div></>}</section>{data&&<div className="two-col"><section className="card"><div className="section-label">Fresh customers — latest outcome that day</div><Split rows={data.freshDispositionSplit}/></section><section className="card"><div className="section-label">Repeat customers — latest outcome that day</div><Split rows={data.repeatDispositionSplit}/></section></div>}</main></div>
+}
+function Split({rows}:{rows:any[]}){return rows.length?<table className="split"><thead><tr><th>Outcome</th><th>#</th><th>%</th></tr></thead><tbody>{rows.map(r=><tr key={r.outcome}><td>{r.outcome}</td><td>{r.count}</td><td>{r.percent}%</td></tr>)}</tbody></table>:<div className="empty">No calls for this date.</div>}

@@ -1,0 +1,18 @@
+{
+  "source_file": "Disposition Sheet - Sellers.xlsx",
+  "authoritative_sheets": [
+    "Highly interested cx (Umesh)",
+    "Highly interested cx (Sheena)",
+    "Highly Interested CX (Ashish)"
+  ],
+  "unique_customers": 1039,
+  "standard_historical_calls": 1651,
+  "legacy_followups": 233,
+  "total_historical_interactions": 1884,
+  "standard_calls_with_status": 953,
+  "standard_calls_without_status": 698,
+  "cross_sheet_overlap_customers": 21,
+  "earliest_detected_date": "2025-08-23",
+  "latest_detected_date": "2026-08-25",
+  "warning": "At least one historical date appears to be in 2025. The migration preserves source dates instead of silently correcting them. Review source:report output before migration."
+}
