@@ -24,19 +24,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Decrypt historical source workbook
+      - name: Decrypt verified historical migration payload
         env:
           GITHUB_TOKEN: ${{ github.token }}
           MIGRATION_DATA_KEY: ${{ secrets.MIGRATION_DATA_KEY }}
           MIGRATION_PAYLOAD_ISSUE: '1'
-          MIGRATION_SOURCE_XLSX: /tmp/Disposition-Sheet-Sellers.xlsx
+          MIGRATION_PAYLOAD_JSON: /tmp/pi-migration-payload.json
         run: node scripts/fetch-migration-payload.mjs
 
       - name: Run atomic Neon migration and reconciliation
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npx tsx scripts/migrate-neon.ts /tmp/Disposition-Sheet-Sellers.xlsx
+          MIGRATION_PAYLOAD_JSON: /tmp/pi-migration-payload.json
+        run: npx tsx scripts/migrate-neon.ts
 
-      - name: Remove decrypted temporary workbook
+      - name: Remove decrypted temporary payload
         if: always()
-        run: rm -f /tmp/Disposition-Sheet-Sellers.xlsx
+        run: rm -f /tmp/pi-migration-payload.json
