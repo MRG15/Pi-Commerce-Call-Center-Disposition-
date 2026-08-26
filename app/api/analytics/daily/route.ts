@@ -49,18 +49,15 @@ export async function GET(req: Request) {
   const whatsappHandoffs=count('WHATSAPP_HANDOFF');
   const fbLinkingIssues=count('FB_LINKING_ISSUE');
 
-  const byCustomer=new Map<string,any[]>();
-  for (const r of rows) { const a=byCustomer.get(r.customer_id)||[]; a.push(r); byCustomer.set(r.customer_id,a); }
-  let freshCustomers=0, repeatCustomers=0;
+  const freshRows=rows.filter((r:any)=>!r.had_prior_call);
+  const repeatRows=rows.filter((r:any)=>r.had_prior_call);
+  const freshCustomers=freshRows.length;
+  const repeatCustomers=repeatRows.length;
   const freshDisp=new Map<string,number>(), repeatDisp=new Map<string,number>();
   const add=(m:Map<string,number>,k:string)=>m.set(k,(m.get(k)||0)+1);
-  for (const [,calls] of byCustomer) {
-    const fresh=!calls[0].had_prior_call;
-    const latest=calls[calls.length-1];
-    const outcome=latest.l0_label_snapshot || latest.status_raw || latest.remark || 'No outcome recorded';
-    if (fresh) { freshCustomers++; add(freshDisp,outcome); }
-    else { repeatCustomers++; add(repeatDisp,outcome); }
-  }
+  const outcome=(r:any)=>r.l0_label_snapshot || r.status_raw || 'No status recorded';
+  for(const r of freshRows) add(freshDisp,outcome(r));
+  for(const r of repeatRows) add(repeatDisp,outcome(r));
   const toSplit=(m:Map<string,number>,den:number)=>[...m.entries()].sort((a,b)=>b[1]-a[1]).map(([outcome,count])=>({outcome,count,percent:pct(count,den)}));
 
   const agentMap=new Map<string,{attempts:number,unique:Set<string>,connected:number,interested:number,paymentDone:number,callbacks:number,paymentIssues:number,technicalIssues:number,whatsappHandoffs:number}>();
@@ -96,9 +93,9 @@ export async function GET(req: Request) {
     repeatDispositionSplit:toSplit(repeatDisp,repeatCustomers),
     agentPerformance,
     definitions:{
-      fresh:'A customer whose first-ever recorded interaction occurs in the selected period.',
-      repeat:'A customer with at least one recorded interaction before their first interaction in the selected period.',
-      dispositionSplit:'For unique-customer splits, the latest interaction in the selected period is used.',
+      fresh:'A fresh call is the customer\'s first-ever recorded interaction.',
+      repeat:'Every later call for that customer is repeat, including another call on the same day.',
+      dispositionSplit:'Fresh/repeat splits use the actual taxonomy/status on each call. Remarks are never used as dispositions.',
       connectRate:'Conservative: known connected/not-connected outcomes only. Unknown legacy outcomes are excluded.',
       semanticBuckets:'Quick Answers classifies approved disposition/status labels across L0, L1 or L2; it never scans free-text remarks.',
       visitsRequested:'Only date-attributable call dispositions are counted; legacy customer-level flags are not assigned to a guessed call date.'
