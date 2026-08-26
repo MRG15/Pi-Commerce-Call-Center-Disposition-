@@ -1,0 +1,18 @@
+{
+  "calculated_directly_from_uploaded_workbook": true,
+  "authoritative_sheets": [
+    "Highly interested cx (Umesh)",
+    "Highly interested cx (Sheena)",
+    "Highly Interested CX (Ashish)"
+  ],
+  "unique_customers": 1039,
+  "standard_historical_calls": 1650,
+  "legacy_followups": 233,
+  "total_historical_interactions": 1883,
+  "cross_sheet_overlap_customers": 21,
+  "standard_calls_with_status": 953,
+  "standard_calls_without_status": 930,
+  "display_rule": "status+remark→show both | status_only→show status | remark_only→show remark | neither→No outcome recorded | never generate historical L0/L1/L2",
+  "duplicate_cid_rule": "Multiple source rows with same CID create ONE customer; individual call events independently preserved with source_sheet, source_row, source_slot",
+  "note": "Locked baselines from independent Python/openpyxl audit dated 2026-08-26. The source:report script recalculates from the workbook at runtime. Migration validation checks against these exact figures."
+}

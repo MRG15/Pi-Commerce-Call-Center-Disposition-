@@ -1,0 +1,43 @@
+name: Neon Production Migration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout hardened migration branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Decrypt verified historical migration payload
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MIGRATION_DATA_KEY: ${{ secrets.MIGRATION_DATA_KEY }}
+          MIGRATION_PAYLOAD_ISSUE: '1'
+          MIGRATION_PAYLOAD_JSON: /tmp/pi-migration-payload.json
+        run: node scripts/fetch-migration-payload.mjs
+
+      - name: Run atomic Neon migration and reconciliation
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          MIGRATION_PAYLOAD_JSON: /tmp/pi-migration-payload.json
+        run: npx tsx scripts/migrate-neon.ts
+
+      - name: Remove decrypted temporary payload
+        if: always()
+        run: rm -f /tmp/pi-migration-payload.json

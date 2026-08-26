@@ -1,0 +1,10 @@
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+migration-report.json
+migration-validation.json
+*.log
+.DS_Store
+source/*.xlsx

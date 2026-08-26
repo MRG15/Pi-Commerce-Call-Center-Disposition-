@@ -1,0 +1,31 @@
+{
+  "name": "pi-commerce-disposition",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:setup": "tsx scripts/setup-db.ts",
+    "db:seed": "tsx scripts/seed-dispositions.ts",
+    "source:report": "tsx scripts/source-report.ts",
+    "migrate:data": "tsx scripts/migrate-data.ts",
+    "migrate:validate": "tsx scripts/validate-migration.ts",
+    "migrate:neon": "tsx scripts/migrate-neon.ts",
+    "agent:create": "tsx scripts/create-agent.ts"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "next": "^15.5.0",
+    "postgres": "^3.4.7",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
