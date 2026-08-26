@@ -1,24 +1,10 @@
 import { NextResponse } from 'next/server';
 import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { connectionBucket, normalizeStatus } from '@/lib/status';
+import { connectionBucket } from '@/lib/status';
+import { classifyCall, hasBucket } from '@/lib/analytics-classification';
 
 function pct(n:number,d:number){return d?Math.round(n*1000/d)/10:0;}
-function isCallback(r:any){
-  const parts=[r.l0_label_snapshot,r.l1_label_snapshot,r.l2_label_snapshot,r.status_raw].filter(Boolean).map((v:string)=>normalizeStatus(v));
-  return parts.some((v:string|null)=>v?.includes('callback')||v==='call back');
-}
-function isInterested(r:any){
-  const l0=normalizeStatus(r.l0_label_snapshot);
-  const raw=normalizeStatus(r.status_raw);
-  return l0==='interested' || !!raw && (raw.includes('interested') || raw==='cx on process');
-}
-function isPaymentDone(r:any){
-  return [r.l1_label_snapshot,r.l2_label_snapshot,r.status_raw].filter(Boolean).some((v:string)=>normalizeStatus(v)==='payment done');
-}
-function isVisitRequested(r:any){
-  return [r.l1_label_snapshot,r.l2_label_snapshot].filter(Boolean).some((v:string)=>normalizeStatus(v)?.includes('field visit'));
-}
 
 export async function GET(req: Request) {
   const agent=await currentAgent();
@@ -33,7 +19,7 @@ export async function GET(req: Request) {
 
   const rows=await sql`
     SELECT c.customer_id,c.attempt_number,c.call_seq,c.source_type,c.status_raw,c.remark,
-           c.l0_label_snapshot,c.l1_label_snapshot,c.l2_label_snapshot,c.call_date,
+           c.l0_label_snapshot,c.l1_label_snapshot,c.l2_label_snapshot,c.call_date,c.whatsapp_handoff,
            COALESCE(a.name,c.agent_name_raw,'Unknown') AS agent_name,
            EXISTS (
              SELECT 1 FROM calls p
@@ -52,10 +38,16 @@ export async function GET(req: Request) {
   const connected=rows.filter((r:any)=>connectionBucket(r.l0_label_snapshot||r.status_raw)==='connected').length;
   const notConnected=rows.filter((r:any)=>connectionBucket(r.l0_label_snapshot||r.status_raw)==='not_connected').length;
   const unknownConnection=totalAttempts-connected-notConnected;
-  const callbackRequested=rows.filter(isCallback).length;
-  const interested=rows.filter(isInterested).length;
-  const paymentDone=rows.filter(isPaymentDone).length;
-  const visitsRequested=rows.filter(isVisitRequested).length;
+
+  const count=(bucket:any)=>rows.filter((r:any)=>hasBucket(r,bucket)).length;
+  const callbackRequested=count('CALLBACK');
+  const interested=count('INTERESTED');
+  const paymentDone=count('PAYMENT_DONE');
+  const visitsRequested=count('VISIT_REQUESTED');
+  const paymentIssues=count('PAYMENT_ISSUE');
+  const technicalIssues=count('TECHNICAL_ISSUE');
+  const whatsappHandoffs=count('WHATSAPP_HANDOFF');
+  const fbLinkingIssues=count('FB_LINKING_ISSUE');
 
   const byCustomer=new Map<string,any[]>();
   for (const r of rows) { const a=byCustomer.get(r.customer_id)||[]; a.push(r); byCustomer.set(r.customer_id,a); }
@@ -71,17 +63,26 @@ export async function GET(req: Request) {
   }
   const toSplit=(m:Map<string,number>,den:number)=>[...m.entries()].sort((a,b)=>b[1]-a[1]).map(([outcome,count])=>({outcome,count,percent:pct(count,den)}));
 
-  const agentMap=new Map<string,{attempts:number,unique:Set<string>,connected:number,interested:number,paymentDone:number,callbacks:number}>();
+  const agentMap=new Map<string,{attempts:number,unique:Set<string>,connected:number,interested:number,paymentDone:number,callbacks:number,paymentIssues:number,technicalIssues:number,whatsappHandoffs:number}>();
   for(const r of rows){
-    const k=r.agent_name||'Unknown'; const x=agentMap.get(k)||{attempts:0,unique:new Set<string>(),connected:0,interested:0,paymentDone:0,callbacks:0};
+    const k=r.agent_name||'Unknown';
+    const x=agentMap.get(k)||{attempts:0,unique:new Set<string>(),connected:0,interested:0,paymentDone:0,callbacks:0,paymentIssues:0,technicalIssues:0,whatsappHandoffs:0};
     x.attempts++; x.unique.add(r.customer_id);
     if(connectionBucket(r.l0_label_snapshot||r.status_raw)==='connected')x.connected++;
-    if(isInterested(r))x.interested++;
-    if(isPaymentDone(r))x.paymentDone++;
-    if(isCallback(r))x.callbacks++;
+    const buckets=classifyCall(r);
+    if(buckets.has('INTERESTED'))x.interested++;
+    if(buckets.has('PAYMENT_DONE'))x.paymentDone++;
+    if(buckets.has('CALLBACK'))x.callbacks++;
+    if(buckets.has('PAYMENT_ISSUE'))x.paymentIssues++;
+    if(buckets.has('TECHNICAL_ISSUE'))x.technicalIssues++;
+    if(buckets.has('WHATSAPP_HANDOFF'))x.whatsappHandoffs++;
     agentMap.set(k,x);
   }
-  const agentPerformance=[...agentMap.entries()].map(([name,x])=>({name,attempts:x.attempts,unique:x.unique.size,connected:x.connected,connectRate:pct(x.connected,x.attempts),interested:x.interested,paymentDone:x.paymentDone,callbacks:x.callbacks})).sort((a,b)=>b.attempts-a.attempts);
+  const agentPerformance=[...agentMap.entries()].map(([name,x])=>({
+    name,attempts:x.attempts,unique:x.unique.size,connected:x.connected,connectRate:pct(x.connected,x.attempts),
+    interested:x.interested,paymentDone:x.paymentDone,callbacks:x.callbacks,paymentIssues:x.paymentIssues,
+    technicalIssues:x.technicalIssues,whatsappHandoffs:x.whatsappHandoffs
+  })).sort((a,b)=>b.attempts-a.attempts);
 
   return NextResponse.json({
     from,to,totalAttempts,uniqueAttempted,freshCustomers,repeatCustomers,
@@ -90,7 +91,7 @@ export async function GET(req: Request) {
     callbackRequested,callbackRate:pct(callbackRequested,totalAttempts),
     interested,interestedRate:pct(interested,totalAttempts),
     paymentDone,paymentRate:pct(paymentDone,totalAttempts),
-    visitsRequested,
+    visitsRequested,paymentIssues,technicalIssues,whatsappHandoffs,fbLinkingIssues,
     freshDispositionSplit:toSplit(freshDisp,freshCustomers),
     repeatDispositionSplit:toSplit(repeatDisp,repeatCustomers),
     agentPerformance,
@@ -99,7 +100,8 @@ export async function GET(req: Request) {
       repeat:'A customer with at least one recorded interaction before their first interaction in the selected period.',
       dispositionSplit:'For unique-customer splits, the latest interaction in the selected period is used.',
       connectRate:'Conservative: known connected/not-connected outcomes only. Unknown legacy outcomes are excluded.',
-      visitsRequested:'Only new-taxonomy calls with the assisted support / field visit disposition; legacy customer-level visit flags are not date-attributed.'
+      semanticBuckets:'Quick Answers classifies approved disposition/status labels across L0, L1 or L2; it never scans free-text remarks.',
+      visitsRequested:'Only date-attributable call dispositions are counted; legacy customer-level flags are not assigned to a guessed call date.'
     }
   });
 }
