@@ -63,7 +63,9 @@ function cellText(v: any): string | null {
 export function normalizeCustomerId(v: any): string | null {
   const t = cellText(v);
   if (!t) return null;
-  return /^\d+\.0$/.test(t) ? t.slice(0,-2) : t;
+  const stripped = /^\d+\.0$/.test(t) ? t.slice(0,-2) : t;
+  if (!/^\d+$/.test(stripped)) return null;
+  return stripped;
 }
 
 export function normalizeDate(v: any): string | null {
