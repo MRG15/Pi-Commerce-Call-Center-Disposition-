@@ -11,6 +11,7 @@
     "source:report": "tsx scripts/source-report.ts",
     "migrate:data": "tsx scripts/migrate-data.ts",
     "migrate:validate": "tsx scripts/validate-migration.ts",
+    "migrate:neon": "tsx scripts/migrate-neon.ts",
     "agent:create": "tsx scripts/create-agent.ts"
   },
   "dependencies": {
