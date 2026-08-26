@@ -35,7 +35,7 @@ try {
 const parts = comments
   .map(c => String(c.body || ''))
   .map(body => {
-    const m = body.match(/^PART(\d{2})\n([\s\S]+)$/);
+    const m = body.match(/^PART(\d{2})\r?\n([\s\S]+)$/);
     return m ? { n: Number(m[1]), data: m[2].trim() } : null;
   })
   .filter(Boolean)
@@ -46,15 +46,24 @@ for (let i = 0; i < parts.length; i++) {
   if (parts[i].n !== i + 1) fail(`missing/out-of-order migration payload part: expected PART${String(i + 1).padStart(2, '0')}`);
 }
 
-let envelope;
-try {
-  envelope = JSON.parse(parts.map(p => p.data).join(''));
-} catch {
-  fail('encrypted migration envelope is malformed');
-}
-if (envelope?.v !== 2 || envelope?.alg !== 'AES-256-GCM' || envelope?.format !== 'brotli-compact-v1') {
-  fail('encrypted migration envelope version/format is invalid');
-}
+// The encrypted envelope is deliberately split through the middle of the
+// ciphertext string. Reconstruct its known framing directly instead of
+// asking JSON.parse to interpret intermediate chunk boundaries.
+const joined = parts.map(p => p.data).join('');
+const marker = '"ciphertext":"';
+const markerAt = joined.indexOf(marker);
+if (markerAt < 0 || !joined.endsWith('"}')) fail('encrypted migration envelope framing is malformed');
+const header = joined.slice(0, markerAt + marker.length);
+const headerMatch = header.match(/^\{"v":2,"alg":"AES-256-GCM","format":"brotli-compact-v1","nonce":"([A-Za-z0-9+/=]+)","ciphertext":"$/);
+if (!headerMatch) fail('encrypted migration envelope header is invalid');
+const envelope = {
+  v: 2,
+  alg: 'AES-256-GCM',
+  format: 'brotli-compact-v1',
+  nonce: headerMatch[1],
+  ciphertext: joined.slice(markerAt + marker.length, -2),
+};
+if (!/^[A-Za-z0-9+/=]+$/.test(envelope.ciphertext)) fail('encrypted migration ciphertext contains invalid characters');
 
 let decoded;
 try {
