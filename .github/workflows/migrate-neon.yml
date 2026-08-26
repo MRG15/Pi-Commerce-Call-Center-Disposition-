@@ -5,14 +5,13 @@ on:
 
 permissions:
   contents: read
-  issues: read
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout hardened migration branch
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node
@@ -24,11 +23,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Decrypt verified historical migration payload
+      - name: Decrypt and verify historical migration payload
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           MIGRATION_DATA_KEY: ${{ secrets.MIGRATION_DATA_KEY }}
-          MIGRATION_PAYLOAD_ISSUE: '1'
+          MIGRATION_PAYLOAD_ENC: migration/historical-payload.enc
           MIGRATION_PAYLOAD_JSON: /tmp/pi-migration-payload.json
         run: node scripts/fetch-migration-payload.mjs
 
