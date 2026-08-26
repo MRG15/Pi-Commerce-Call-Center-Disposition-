@@ -38,7 +38,9 @@ export async function POST(req: Request) {
       if (fbRequired.has(String(l1?.label||'')) && !fb) throw new Error('Facebook Page Status is required for this disposition');
       const max=await tx`SELECT COALESCE(max(attempt_number),0)::int AS n FROM calls WHERE customer_id=${customerId}`;
       const attempt=Number(max[0].n)+1;
-      const today=new Date().toISOString().slice(0,10);
+      // Business date is India time. Using UTC here would record the previous date between 00:00-05:30 IST.
+      const [dateRow]=await tx`SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date::text AS today`;
+      const today=String(dateRow.today);
       const seqRows=await tx`SELECT COALESCE(max(call_seq),0)::int AS n FROM calls WHERE customer_id=${customerId} AND call_date=${today}::date`;
       const seq=Number(seqRows[0].n)+1;
       const sourceKey=`NEW|${customerId}|${Date.now()}|${crypto.randomUUID()}`;
