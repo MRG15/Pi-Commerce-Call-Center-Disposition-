@@ -2,10 +2,8 @@ import fs from 'fs';
 import crypto from 'crypto';
 import zlib from 'zlib';
 
-const repo = process.env.GITHUB_REPOSITORY;
-const token = process.env.GITHUB_TOKEN;
 const keyB64 = process.env.MIGRATION_DATA_KEY;
-const issue = process.env.MIGRATION_PAYLOAD_ISSUE || '1';
+const encryptedPath = process.env.MIGRATION_PAYLOAD_ENC || 'migration/historical-payload.enc';
 const out = process.env.MIGRATION_PAYLOAD_JSON || '/tmp/pi-migration-payload.json';
 
 function fail(message) {
@@ -13,57 +11,24 @@ function fail(message) {
   process.exit(1);
 }
 
-if (!repo || !token || !keyB64) fail('missing required GitHub or migration-key environment variable');
+if (!keyB64) fail('MIGRATION_DATA_KEY is missing');
 const key = Buffer.from(keyB64, 'base64');
 if (key.length !== 32) fail('MIGRATION_DATA_KEY is invalid');
+if (!fs.existsSync(encryptedPath)) fail(`encrypted migration payload file not found: ${encryptedPath}`);
 
-let comments;
+let envelope;
 try {
-  const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issue}/comments?per_page=100`, {
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28',
-    },
-  });
-  if (!res.ok) fail(`could not fetch encrypted payload comments (HTTP ${res.status})`);
-  comments = await res.json();
-} catch (err) {
-  fail(`could not fetch encrypted payload comments: ${err instanceof Error ? err.message : 'unknown error'}`);
+  envelope = JSON.parse(fs.readFileSync(encryptedPath, 'utf8'));
+} catch {
+  fail('encrypted migration envelope is malformed');
 }
 
-const parts = comments
-  .map(c => String(c.body || ''))
-  .map(body => {
-    const m = body.match(/^PART(\d{2})\r?\n([\s\S]+)$/);
-    return m ? { n: Number(m[1]), data: m[2].trim() } : null;
-  })
-  .filter(Boolean)
-  .sort((a, b) => a.n - b.n);
-
-if (!parts.length) fail('no migration payload parts found');
-for (let i = 0; i < parts.length; i++) {
-  if (parts[i].n !== i + 1) fail(`missing/out-of-order migration payload part: expected PART${String(i + 1).padStart(2, '0')}`);
+if (envelope?.v !== 2 || envelope?.alg !== 'AES-256-GCM' || envelope?.format !== 'brotli-compact-v1') {
+  fail('encrypted migration envelope version/format is invalid');
 }
-
-// The encrypted envelope is deliberately split through the middle of the
-// ciphertext string. Reconstruct its known framing directly instead of
-// asking JSON.parse to interpret intermediate chunk boundaries.
-const joined = parts.map(p => p.data).join('');
-const marker = '"ciphertext":"';
-const markerAt = joined.indexOf(marker);
-if (markerAt < 0 || !joined.endsWith('"}')) fail('encrypted migration envelope framing is malformed');
-const header = joined.slice(0, markerAt + marker.length);
-const headerMatch = header.match(/^\{"v":2,"alg":"AES-256-GCM","format":"brotli-compact-v1","nonce":"([A-Za-z0-9+/=]+)","ciphertext":"$/);
-if (!headerMatch) fail('encrypted migration envelope header is invalid');
-const envelope = {
-  v: 2,
-  alg: 'AES-256-GCM',
-  format: 'brotli-compact-v1',
-  nonce: headerMatch[1],
-  ciphertext: joined.slice(markerAt + marker.length, -2),
-};
-if (!/^[A-Za-z0-9+/=]+$/.test(envelope.ciphertext)) fail('encrypted migration ciphertext contains invalid characters');
+if (!/^[A-Za-z0-9+/=]+$/.test(String(envelope.nonce || '')) || !/^[A-Za-z0-9+/=]+$/.test(String(envelope.ciphertext || ''))) {
+  fail('encrypted migration envelope contains invalid characters');
+}
 
 let decoded;
 try {
@@ -96,15 +61,19 @@ const calls = (decoded.c || []).map(values => {
   if (!sheet) fail('unknown source sheet code in migration payload');
   const sourceType = typeCode === 1 ? 'legacy_followup' : 'standard_call';
   return {
-    customerId, sheet, row,
+    customerId,
+    sheet,
+    row,
     sourceCallNum: typeCode === 1 ? `Callback ${n}` : `Call ${n}`,
-    sourceType, date,
+    sourceType,
+    date,
     agentName: agentName ?? null,
     statusRaw: statusRaw ?? null,
     whatHappened: whatHappened ?? null,
     remark: remark ?? null,
     sourceKey: typeCode === 1 ? `${sheet}|${row}|CB${n}` : `${sheet}|${row}|CALL${n}`,
-    attemptNumber, callSeq,
+    attemptNumber,
+    callSeq,
   };
 });
 const flags = (decoded.f || []).map(values => {
@@ -116,11 +85,18 @@ const flags = (decoded.f || []).map(values => {
 });
 const [customersN, standardN, followupN, totalN] = decoded.l || [];
 const payload = {
-  customers, calls, flags,
-  locked: { customers: customersN, standard_calls: standardN, legacy_followups: followupN, total_interactions: totalN },
+  customers,
+  calls,
+  flags,
+  locked: {
+    customers: customersN,
+    standard_calls: standardN,
+    legacy_followups: followupN,
+    total_interactions: totalN,
+  },
 };
 
-const expected = { customers:1039, standard_calls:1650, legacy_followups:233, total_interactions:1883 };
+const expected = { customers: 1039, standard_calls: 1650, legacy_followups: 233, total_interactions: 1883 };
 for (const [k, v] of Object.entries(expected)) {
   if (Number(payload.locked[k]) !== v) fail(`locked baseline mismatch for ${k}`);
 }
