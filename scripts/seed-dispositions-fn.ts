@@ -4,7 +4,18 @@ const tree: Record<string, any> = {
   'Interested': {
     'Payment done': [],
     'Callback — mid-pitch': [],
-    'Taken to WhatsApp for closure': ['Enrolled via WhatsApp','Technical blocker (see remark)','Creative not satisfactory','Callback needed'],
+    'Taken to WhatsApp for closure': [
+      'Enrolled via WhatsApp',
+      'Pi icon not visible in P4B',
+      'Blank / non-loading home page',
+      'Facebook login failing',
+      'No Facebook business page',
+      'Facebook page link failing',
+      'Ad not being generated',
+      'Payment not processing',
+      'Creative not satisfactory',
+      'Callback needed'
+    ],
     'Technical blocker': ['Pi icon not visible in P4B','Blank / non-loading home page','Facebook login failing','No Facebook business page','Facebook page link failing','Ad not being generated','Payment not processing'],
     'Pricing concern': ['₹799 too high','Wants free trial','No recurring subscription','Pay-per-spend only','Unclear what fee covers','Cheaper agency'],
     'Creative not satisfactory': ['Image not relevant','Text/language wrong','Wants to upload own','Wants more variants','Logo/brand issue'],
