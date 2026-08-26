@@ -24,10 +24,6 @@ function hasExact(p:string[], values:string[]) {
   return p.some(v=>values.includes(v));
 }
 
-function hasText(p:string[], text:string) {
-  return p.some(v=>v.includes(text));
-}
-
 export function classifyCall(r:any): Set<AnalyticsBucket> {
   const p=parts(r);
   const out=new Set<AnalyticsBucket>();
@@ -36,8 +32,12 @@ export function classifyCall(r:any): Set<AnalyticsBucket> {
   if(nonConnected) out.add('NOT_CONNECTED'); else if(p.length) out.add('CONNECTED');
 
   if(p.some(v=>v.includes('callback')||v==='call back')) out.add('CALLBACK');
-  if(hasExact(p,['interested']) || p.some(v=>v.includes('interested')) || hasExact(p,['cx on process'])) out.add('INTERESTED');
-  if(hasExact(p,['not interested'])) out.add('NOT_INTERESTED');
+
+  const notInterested=p.some(v=>v==='not interested' || v.includes('not interested'));
+  if(notInterested) out.add('NOT_INTERESTED');
+  const interested=!notInterested && (hasExact(p,['interested','cx on process']) || p.some(v=>v.includes('interested')));
+  if(interested) out.add('INTERESTED');
+
   if(hasExact(p,['payment done'])) out.add('PAYMENT_DONE');
 
   const paymentIssue=hasExact(p,['payment not processing','payment issue']);
