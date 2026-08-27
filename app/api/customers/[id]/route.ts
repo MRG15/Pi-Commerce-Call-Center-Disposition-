@@ -16,7 +16,7 @@ export async function GET(_: Request, ctx: {params: Promise<{id:string}>}) {
       c.agent_id,c.agent_name_raw,c.source_type,c.source_sheet,c.source_row,c.source_call_num,c.source_key,
       c.status_raw,c.status_normalized,c.what_happened,c.remark,
       c.l0_id,c.l1_id,c.l2_id,c.l0_label_snapshot,c.l1_label_snapshot,c.l2_label_snapshot,
-      c.facebook_page_status,c.whatsapp_handoff,c.call_duration_seconds,
+      c.facebook_page_status,c.whatsapp_handoff,c.call_duration_seconds,c.callback_at,
       c.is_legacy,c.is_conversion_authoritative,c.created_at,
       a.name AS agent_name,
       COALESCE(c.l0_label_snapshot,c.status_raw) AS outcome_primary

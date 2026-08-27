@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
 
+function isCallbackLabel(v:string|null|undefined){
+  const s=String(v||'').toLowerCase();
+  return s.includes('callback') || s.includes('call back');
+}
+
 export async function POST(req: Request) {
   const agent=await currentAgent();
   if (!agent) return NextResponse.json({error:'Unauthenticated'},{status:401});
@@ -12,6 +17,8 @@ export async function POST(req: Request) {
   const l2Code=body.l2Code ? String(body.l2Code) : null;
   const remark=body.remark ? String(body.remark).trim() : null;
   const fb=body.facebookPageStatus ? String(body.facebookPageStatus) : null;
+  const callbackDate=body.callbackDate ? String(body.callbackDate) : null;
+  const callbackTime=body.callbackTime ? String(body.callbackTime) : null;
   if (!customerId || !l0Code) return NextResponse.json({error:'Customer ID and L0 are required'},{status:400});
   const sql=db();
   try {
@@ -36,6 +43,18 @@ export async function POST(req: Request) {
       if (callbackNeedsRemark.has(String(l1?.label||'')) && !remark) throw new Error('Remark is required for callback dispositions');
       const fbRequired = new Set(['Payment done','Taken to WhatsApp for closure','Technical blocker']);
       if (fbRequired.has(String(l1?.label||'')) && !fb) throw new Error('Facebook Page Status is required for this disposition');
+
+      const callbackSelected=[l0?.label,l1?.label,l2?.label].some(isCallbackLabel);
+      let callbackAt:any=null;
+      if(callbackSelected){
+        if(!callbackDate || !callbackTime) throw new Error('Callback date and time are required for callback dispositions');
+        const cb=await tx`
+          SELECT ((${callbackDate}::date + ${callbackTime}::time) AT TIME ZONE 'Asia/Kolkata') AS callback_at
+        `;
+        callbackAt=cb[0]?.callback_at||null;
+        if(!callbackAt || new Date(callbackAt).getTime()<=Date.now()) throw new Error('Callback date and time must be in the future');
+      }
+
       const max=await tx`SELECT COALESCE(max(attempt_number),0)::int AS n FROM calls WHERE customer_id=${customerId}`;
       const attempt=Number(max[0].n)+1;
       // Business date is India time. Using UTC here would record the previous date between 00:00-05:30 IST.
@@ -48,11 +67,11 @@ export async function POST(req: Request) {
         INSERT INTO calls (
           customer_id,attempt_number,call_date,call_seq,event_time,agent_id,agent_name_raw,source_type,source_key,
           l0_id,l1_id,l2_id,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,facebook_page_status,
-          whatsapp_handoff,is_legacy,is_conversion_authoritative
+          whatsapp_handoff,callback_at,is_legacy,is_conversion_authoritative
         ) VALUES (
           ${customerId},${attempt},${today}::date,${seq},now(),${String(agent.id)}::uuid,${String(agent.name)},'new_call',${sourceKey},
           ${String(l0.id)}::uuid,${l1?String(l1.id):null}::uuid,${l2?String(l2.id):null}::uuid,${String(l0.label)},${l1?String(l1.label):null},${l2?String(l2.label):null},${remark},${fb},
-          ${String(l1?.label||'')==='Taken to WhatsApp for closure'},FALSE,TRUE
+          ${String(l1?.label||'')==='Taken to WhatsApp for closure'},${callbackAt},FALSE,TRUE
         ) RETURNING *
       `;
       return rows[0];
