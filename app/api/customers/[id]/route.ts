@@ -11,7 +11,14 @@ export async function GET(_: Request, ctx: {params: Promise<{id:string}>}) {
   const sql=db();
   const customers=await sql`SELECT * FROM customers WHERE customer_id=${customerId} LIMIT 1`;
   const calls=await sql`
-    SELECT c.*, a.name AS agent_name,
+    SELECT
+      c.id,c.customer_id,c.attempt_number,c.call_date,c.call_seq,c.event_time,
+      c.agent_id,c.agent_name_raw,c.source_type,c.source_sheet,c.source_row,c.source_call_num,c.source_key,
+      c.status_raw,c.status_normalized,c.what_happened,c.remark,
+      c.l0_id,c.l1_id,c.l2_id,c.l0_label_snapshot,c.l1_label_snapshot,c.l2_label_snapshot,
+      c.facebook_page_status,c.whatsapp_handoff,c.call_duration_seconds,c.callback_at,
+      c.is_legacy,c.is_conversion_authoritative,c.created_at,
+      a.name AS agent_name,
       COALESCE(c.l0_label_snapshot,c.status_raw) AS outcome_primary
     FROM calls c LEFT JOIN agents a ON a.id=c.agent_id
     WHERE c.customer_id=${customerId}
