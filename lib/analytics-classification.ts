@@ -38,7 +38,7 @@ export function classifyCall(r:any): Set<AnalyticsBucket> {
   const interested=!notInterested && (hasExact(p,['interested','cx on process']) || p.some(v=>v.includes('interested')));
   if(interested) out.add('INTERESTED');
 
-  if(hasExact(p,['payment done'])) out.add('PAYMENT_DONE');
+  if(hasExact(p,['payment done','enrolled via whatsapp'])) out.add('PAYMENT_DONE');
 
   const paymentIssue=hasExact(p,['payment not processing','payment issue']);
   if(paymentIssue) out.add('PAYMENT_ISSUE');
