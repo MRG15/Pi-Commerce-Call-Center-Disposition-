@@ -24,7 +24,6 @@ export async function GET(){
         WHERE later.customer_id=c.customer_id
           AND later.attempt_number>c.attempt_number
           AND later.event_time IS NOT NULL
-          AND later.event_time>=c.callback_at
       )
     ORDER BY c.callback_at ASC
   `;
