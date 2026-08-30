@@ -23,8 +23,6 @@ export async function GET(){
         SELECT 1 FROM calls later
         WHERE later.customer_id=c.customer_id
           AND later.attempt_number>c.attempt_number
-          AND later.event_time IS NOT NULL
-          AND later.event_time>=c.callback_at
       )
     ORDER BY c.callback_at ASC
   `;
