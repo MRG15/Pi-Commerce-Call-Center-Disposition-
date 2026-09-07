@@ -69,7 +69,7 @@ export async function POST(req: Request) {
             NULLIF(BTRIM(phone_number), '') AS phone_number,
             NULLIF(BTRIM(category), '') AS category,
             NULLIF(BTRIM(sub_category), '') AS sub_category
-          FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
+          FROM jsonb_to_recordset(${tx.json(rows)}::jsonb)
             AS x(customer_id text, merchant_name text, phone_number text, category text, sub_category text)
         )
         INSERT INTO merchant_information (
