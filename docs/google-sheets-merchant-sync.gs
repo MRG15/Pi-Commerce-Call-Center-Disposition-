@@ -27,9 +27,11 @@ function syncMerchantInformation() {
   if (!url || !secret) throw new Error('Missing PI_MERCHANT_SYNC_URL or PI_MERCHANT_SYNC_SECRET script property');
 
   var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = spreadsheet.getSheets()[0]; // Tab 1 is authoritative.
+  var sheet = spreadsheet.getSheetByName('Onboardings');
+  if (!sheet) throw new Error('Sheet named Onboardings not found');
+
   var values = sheet.getDataRange().getValues();
-  if (values.length < 2) throw new Error('No merchant rows found in Tab 1');
+  if (values.length < 2) throw new Error('No merchant rows found in Onboardings');
 
   var headers = values[0].map(function(v) { return String(v || '').trim(); });
   var index = {};
