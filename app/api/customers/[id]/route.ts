@@ -25,7 +25,22 @@ export async function GET(_: Request, ctx: {params: Promise<{id:string}>}) {
     ORDER BY c.call_date,c.call_seq,c.attempt_number
   `;
   const flagRows=await sql`SELECT * FROM customer_legacy_flags WHERE customer_id=${customerId} ORDER BY source_sheet,source_row`;
-  if (!customers[0] && calls.length===0 && flagRows.length===0) return NextResponse.json({found:false, customer:{customer_id:customerId}, summary:{totalAttempts:0,firstCallDate:null,lastCallDate:null,lastAgent:null,latestOutcome:'New customer'}, calls:[], activeFlags:{}, legacyFlagSources:[]});
+
+  const [merchantTable]=await sql`SELECT to_regclass('public.merchant_information')::text AS merchant_table`;
+  let merchant:any=null;
+  if (merchantTable?.merchant_table) {
+    const merchantRows=await sql`
+      SELECT customer_id,merchant_name,phone_number,category,sub_category,last_synced_at
+      FROM merchant_information
+      WHERE customer_id=${customerId} AND active=TRUE
+      LIMIT 1
+    `;
+    merchant=merchantRows[0]||null;
+  }
+
+  if (!customers[0] && calls.length===0 && flagRows.length===0 && !merchant) {
+    return NextResponse.json({found:false, customer:{customer_id:customerId}, merchant:null, summary:{totalAttempts:0,firstCallDate:null,lastCallDate:null,lastAgent:null,latestOutcome:'New customer'}, calls:[], activeFlags:{}, legacyFlagSources:[]});
+  }
 
   const c=customers[0] || {customer_id:customerId};
   const activeFlags = {
@@ -46,5 +61,5 @@ export async function GET(_: Request, ctx: {params: Promise<{id:string}>}) {
     lastAgent:calls.at(-1)?.agent_name ?? calls.at(-1)?.agent_name_raw ?? null,
     latestOutcome:calls.at(-1)?.l0_label_snapshot ?? calls.at(-1)?.status_raw ?? calls.at(-1)?.remark ?? 'No outcome recorded',
   };
-  return NextResponse.json({found:true,customer:c,summary,calls,activeFlags,legacyFlagSources:flagRows});
+  return NextResponse.json({found:true,customer:c,merchant,summary,calls,activeFlags,legacyFlagSources:flagRows});
 }
