@@ -33,8 +33,6 @@ export async function GET(req: Request) {
     ORDER BY c.customer_id,c.call_date,c.call_seq,c.attempt_number
   `;
 
-  // Deliberate cross-workspace exception: Subscription Renewed by an onboarder counts as one Seller Payment Done.
-  // It does not alter seller attempts, connects, fresh/repeat, callbacks or any other seller metric.
   let renewalRows:any[]=[];
   try{
     renewalRows=await sql`
@@ -52,12 +50,10 @@ export async function GET(req: Request) {
   const connected=rows.filter((r:any)=>connectionBucket(r.l0_label_snapshot||r.status_raw)==='connected').length;
   const notConnected=rows.filter((r:any)=>connectionBucket(r.l0_label_snapshot||r.status_raw)==='not_connected').length;
   const unknownConnection=totalAttempts-connected-notConnected;
-
   const count=(bucket:any)=>rows.filter((r:any)=>hasBucket(r,bucket)).length;
   const callbackRequested=count('CALLBACK');
   const interested=count('INTERESTED');
-  const sellerPaymentDone=count('PAYMENT_DONE');
-  const paymentDone=sellerPaymentDone+renewalRows.length;
+  const paymentDone=count('PAYMENT_DONE')+renewalRows.length;
   const visitsRequested=count('VISIT_REQUESTED');
   const paymentIssues=count('PAYMENT_ISSUE');
   const technicalIssues=count('TECHNICAL_ISSUE');
@@ -112,7 +108,7 @@ export async function GET(req: Request) {
     onboardingSubscriptionRenewals:renewalRows.length,
     visitsRequested,paymentIssues,technicalIssues,whatsappHandoffs,fbLinkingIssues,
     freshDispositionSplit:toSplit(freshDisp,freshCustomers),
-    repeatDispositionSplit:toSplit(repeatDisp,freshCustomers?repeatCustomers:repeatCustomers),
+    repeatDispositionSplit:toSplit(repeatDisp,repeatCustomers),
     agentPerformance,
     definitions:{
       fresh:'A fresh call is the customer\'s first-ever recorded interaction.',
