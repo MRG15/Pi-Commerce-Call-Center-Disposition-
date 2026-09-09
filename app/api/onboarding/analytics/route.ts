@@ -19,7 +19,7 @@ export async function GET(req:Request){
       COUNT(*) FILTER (WHERE current_status='open')::int AS open_cases,
       COUNT(*) FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS ads_live,
       COUNT(*) FILTER (WHERE current_status='lost' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS lost,
-      ROUND(AVG(EXTRACT(EPOCH FROM (ads_live_at-COALESCE(sale_date::timestamptz,created_at)))/86400.0)
+      ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (ads_live_at-COALESCE(sale_date::timestamptz,created_at)))/86400.0))
         FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date),1) AS avg_days_to_live,
       COUNT(*) FILTER (WHERE current_status='open' AND (COALESCE(last_activity_at,created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ((now() AT TIME ZONE 'Asia/Kolkata')::date-3))::int AS ageing_cases
     FROM onboarding_cases
@@ -53,7 +53,7 @@ export async function GET(req:Request){
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','historical_import') AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS touches,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.l0_code='OB_SUBS_RENEWED' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS subscriptions_renewed,
       (SELECT COALESCE(SUM(e.top_up_amount_inr),0)::numeric FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS top_up_amount,
-      (SELECT ROUND(AVG(EXTRACT(EPOCH FROM (c.ads_live_at-COALESCE(c.sale_date::timestamptz,c.created_at)))/86400.0),1)
+      (SELECT ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (c.ads_live_at-COALESCE(c.sale_date::timestamptz,c.created_at)))/86400.0)),1)
          FROM onboarding_cases c WHERE c.assigned_to=a.id AND c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS avg_tat
     FROM agents a
     JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding'
