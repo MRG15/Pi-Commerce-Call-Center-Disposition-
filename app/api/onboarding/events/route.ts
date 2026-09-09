@@ -13,10 +13,12 @@ export async function POST(req:Request){
   const l1Code=body.l1Code?String(body.l1Code):null;
   const l2Code=body.l2Code?String(body.l2Code):null;
   const remark=String(body.remark||'').trim()||null;
+  const resolveTechId=body.resolveTechnicalCaseId?String(body.resolveTechnicalCaseId):null;
   const rawTopUp=body.topUpAmount;
   const topUpAmount=rawTopUp===null||rawTopUp===undefined||String(rawTopUp).trim()===''?null:Number(rawTopUp);
   if(topUpAmount!==null&&(!Number.isFinite(topUpAmount)||topUpAmount<0)) return NextResponse.json({error:'Top-up amount must be zero or more.'},{status:400});
-  if(!caseId||!l0Code) return NextResponse.json({error:'Case and outcome are required.'},{status:400});
+  if(!caseId) return NextResponse.json({error:'Case is required.'},{status:400});
+  if(!l0Code&&!resolveTechId) return NextResponse.json({error:'Outcome is required.'},{status:400});
   const sql=db();
   try{
     await sql.begin(async tx=>{
@@ -25,6 +27,26 @@ export async function POST(req:Request){
       const c:any=caseRows[0];
       if(!c) throw new Error('CASE_NOT_FOUND');
       if(!isWorkspaceAdmin(user,'onboarding') && c.assigned_to!==user.id) throw new Error('NOT_ASSIGNED');
+
+      const attemptRows=await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${caseId}::uuid`;
+      const attempt=Number(attemptRows[0]?.n||1);
+
+      // Resolving a technical issue is an event, but must not overwrite the merchant's main onboarding disposition.
+      if(resolveTechId&&!l0Code){
+        const updated=await tx`
+          UPDATE technical_cases SET status='resolved',resolved_by=${user.id}::uuid,resolved_at=now(),latest_remark=COALESCE(${remark},latest_remark),updated_at=now()
+          WHERE id=${resolveTechId}::uuid AND onboarding_case_id=${caseId}::uuid AND status='open'
+          RETURNING id,issue_label
+        `;
+        if(!updated[0]) throw new Error('TECH_NOT_FOUND');
+        await tx`
+          INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l0_label_snapshot,remark)
+          VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'system','TECH_RESOLVED','Technical issue resolved',${remark||updated[0].issue_label})
+        `;
+        await tx`UPDATE onboarding_cases SET last_activity_at=now(),updated_at=now() WHERE id=${caseId}::uuid`;
+        return;
+      }
+
       if(c.current_status!=='open') throw new Error('CASE_CLOSED');
       const codes=[l0Code,l1Code,l2Code].filter(Boolean) as string[];
       const nodes=await tx`SELECT id,code,label,level,parent_id FROM onboarding_disposition_nodes WHERE code=ANY(${codes}) AND active=TRUE`;
@@ -39,8 +61,7 @@ export async function POST(req:Request){
       if(l1Code==='OB_CALLBACK' && !callback) throw new Error('CALLBACK_REQUIRED');
       if(callback && callback.getTime()<=Date.now()) throw new Error('CALLBACK_PAST');
       if((l1Code==='OB_OTHER_PROCESS'||l2Code==='OB_TECH_OTHER') && !remark) throw new Error('REMARK_REQUIRED');
-      const attemptRows=await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${caseId}::uuid`;
-      const attempt=Number(attemptRows[0]?.n||1);
+
       await tx`
         INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l2_code,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr)
         VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'new_event',${l0Code},${l1Code},${l2Code},${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${topUpAmount})
@@ -64,15 +85,14 @@ export async function POST(req:Request){
           `;
         }
       }
-      if(body.resolveTechnicalCaseId){
-        const techId=String(body.resolveTechnicalCaseId);
-        await tx`UPDATE technical_cases SET status='resolved',resolved_by=${user.id}::uuid,resolved_at=now(),latest_remark=COALESCE(${remark},latest_remark),updated_at=now() WHERE id=${techId}::uuid AND onboarding_case_id=${caseId}::uuid AND status='open'`;
+      if(resolveTechId){
+        await tx`UPDATE technical_cases SET status='resolved',resolved_by=${user.id}::uuid,resolved_at=now(),latest_remark=COALESCE(${remark},latest_remark),updated_at=now() WHERE id=${resolveTechId}::uuid AND onboarding_case_id=${caseId}::uuid AND status='open'`;
       }
     });
     return NextResponse.json({ok:true});
   }catch(e:any){
     const code=String(e?.message||'');
-    const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400]};
+    const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],TECH_NOT_FOUND:['Technical case is already resolved or not found.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400]};
     const hit=map[code]; if(hit) return NextResponse.json({error:hit[0]},{status:hit[1]});
     console.error('onboarding event error',e);
     return NextResponse.json({error:'Could not save onboarding update.'},{status:500});
