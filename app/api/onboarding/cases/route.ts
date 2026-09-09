@@ -13,7 +13,7 @@ export async function GET(req:Request){
   const all=isWorkspaceAdmin(user,'onboarding');
   const cases=await sql`
     SELECT c.id,c.customer_id,c.source_type,c.sale_date,c.assigned_to,c.assigned_at,c.current_l0,c.current_l1,c.current_l2,
-      c.current_status,c.next_callback_at,c.last_activity_at,c.ads_live_at,c.created_at,c.updated_at,
+      c.current_status,c.next_callback_at,c.last_activity_at,c.ads_live_at,c.closed_at,c.created_at,c.updated_at,
       a.name AS assigned_name,
       m.merchant_name,m.phone_number,m.category,m.sub_category,
       GREATEST(0,((now() AT TIME ZONE 'Asia/Kolkata')::date-COALESCE(c.sale_date,(c.created_at AT TIME ZONE 'Asia/Kolkata')::date)))::int AS days_since_sale,
@@ -40,19 +40,17 @@ export async function POST(req:Request){
   const body=await req.json();
   const customerId=String(body.customerId||'').trim();
   if(!/^\d+$/.test(customerId)) return NextResponse.json({error:'A numeric customer ID is required.'},{status:400});
-  const saleDate=body.saleDate?String(body.saleDate):null;
-  if(saleDate){
-    const parsed=new Date(`${saleDate}T00:00:00+05:30`);
-    const nowIst=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
-    const todayIst=`${nowIst.getFullYear()}-${String(nowIst.getMonth()+1).padStart(2,'0')}-${String(nowIst.getDate()).padStart(2,'0')}`;
-    if(Number.isNaN(parsed.getTime())||saleDate>todayIst) return NextResponse.json({error:'Date of Sale cannot be in the future.'},{status:400});
-  }
   const sql=db();
   const existing=await sql`SELECT id,assigned_to,current_status FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='open' LIMIT 1`;
   if(existing[0]) return NextResponse.json({error:'This merchant already has an open onboarding case.',caseId:existing[0].id},{status:409});
   const assignee:any=await pickOnboarder(body.assignedTo?String(body.assignedTo):null);
   if(!assignee) return NextResponse.json({error:'No active onboarder is available. Give at least one user Onboarding Agent/Admin access.'},{status:400});
   await sql`INSERT INTO customers(customer_id) VALUES(${customerId}) ON CONFLICT (customer_id) DO NOTHING`;
+  const saleDate=body.saleDate?String(body.saleDate):null;
+  if(saleDate){
+    const todayIst=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    if(saleDate>todayIst) return NextResponse.json({error:'Date of Sale cannot be in the future.'},{status:400});
+  }
   const rows=await sql`
     INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,created_by,last_activity_at)
     VALUES(${customerId},'manual_admin',${saleDate}::date,${assignee.id}::uuid,now(),${user.id}::uuid,now())
