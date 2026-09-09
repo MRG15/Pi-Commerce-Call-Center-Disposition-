@@ -2,6 +2,7 @@ import { db } from './db';
 
 export async function pickOnboarder(preferredId?:string|null){
   const sql=db();
+  // Manual assignment may target any active user with onboarding access.
   if(preferredId){
     const rows=await sql`
       SELECT a.id,a.name
@@ -12,12 +13,14 @@ export async function pickOnboarder(preferredId?:string|null){
     `;
     if(rows[0]) return rows[0];
   }
+  // Automatic routing is deliberately restricted to Onboarding Agents.
+  // Admins/Super Admins manage the queue but are not auto-assigned operational work.
   const rows=await sql`
     SELECT a.id,a.name,
       COUNT(c.id) FILTER (WHERE c.current_status='open')::int AS open_count,
       MAX(c.assigned_at) AS last_assigned_at
     FROM agents a
-    JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding'
+    JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding' AND w.access_level='agent'
     LEFT JOIN onboarding_cases c ON c.assigned_to=a.id
     WHERE a.active=TRUE
     GROUP BY a.id,a.name
