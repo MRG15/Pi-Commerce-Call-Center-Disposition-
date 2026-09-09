@@ -40,13 +40,19 @@ export async function POST(req:Request){
   const body=await req.json();
   const customerId=String(body.customerId||'').trim();
   if(!/^\d+$/.test(customerId)) return NextResponse.json({error:'A numeric customer ID is required.'},{status:400});
+  const saleDate=body.saleDate?String(body.saleDate):null;
+  if(saleDate){
+    const parsed=new Date(`${saleDate}T00:00:00+05:30`);
+    const nowIst=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
+    const todayIst=`${nowIst.getFullYear()}-${String(nowIst.getMonth()+1).padStart(2,'0')}-${String(nowIst.getDate()).padStart(2,'0')}`;
+    if(Number.isNaN(parsed.getTime())||saleDate>todayIst) return NextResponse.json({error:'Date of Sale cannot be in the future.'},{status:400});
+  }
   const sql=db();
   const existing=await sql`SELECT id,assigned_to,current_status FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='open' LIMIT 1`;
   if(existing[0]) return NextResponse.json({error:'This merchant already has an open onboarding case.',caseId:existing[0].id},{status:409});
   const assignee:any=await pickOnboarder(body.assignedTo?String(body.assignedTo):null);
   if(!assignee) return NextResponse.json({error:'No active onboarder is available. Give at least one user Onboarding Agent/Admin access.'},{status:400});
   await sql`INSERT INTO customers(customer_id) VALUES(${customerId}) ON CONFLICT (customer_id) DO NOTHING`;
-  const saleDate=body.saleDate?String(body.saleDate):null;
   const rows=await sql`
     INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,created_by,last_activity_at)
     VALUES(${customerId},'manual_admin',${saleDate}::date,${assignee.id}::uuid,now(),${user.id}::uuid,now())
