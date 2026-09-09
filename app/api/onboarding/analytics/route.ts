@@ -22,7 +22,9 @@ export async function GET(req:Request){
   const events=await sql`
     SELECT
       COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND (event_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS touches,
-      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND (event_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date AND l0_label_snapshot<>'Not Connected')::int AS connected
+      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND (event_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date AND l0_label_snapshot<>'Not Connected')::int AS connected,
+      COUNT(*) FILTER (WHERE source_type='new_event' AND l0_code='OB_SUBS_RENEWED' AND event_date BETWEEN ${from}::date AND ${to}::date)::int AS subscriptions_renewed,
+      COALESCE(SUM(top_up_amount_inr) FILTER (WHERE source_type='new_event' AND event_date BETWEEN ${from}::date AND ${to}::date),0)::numeric AS top_up_amount
     FROM onboarding_events
   `;
   const tech=await sql`
@@ -39,6 +41,8 @@ export async function GET(req:Request){
       COUNT(DISTINCT t.id) FILTER (WHERE t.status='open')::int AS tech_open,
       COUNT(DISTINCT t.id) FILTER (WHERE t.status='resolved' AND (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS tech_resolved,
       COUNT(DISTINCT e.id) FILTER (WHERE e.source_type IN ('new_event','historical_import') AND (e.event_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS touches,
+      COUNT(DISTINCT e.id) FILTER (WHERE e.source_type='new_event' AND e.l0_code='OB_SUBS_RENEWED' AND e.event_date BETWEEN ${from}::date AND ${to}::date)::int AS subscriptions_renewed,
+      COALESCE(SUM(e.top_up_amount_inr) FILTER (WHERE e.source_type='new_event' AND e.event_date BETWEEN ${from}::date AND ${to}::date),0)::numeric AS top_up_amount,
       ROUND(AVG(EXTRACT(EPOCH FROM (c.ads_live_at-COALESCE(c.sale_date::timestamptz,c.created_at)))/86400.0) FILTER (WHERE c.ads_live_at IS NOT NULL),1) AS avg_tat
     FROM agents a
     JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding'
