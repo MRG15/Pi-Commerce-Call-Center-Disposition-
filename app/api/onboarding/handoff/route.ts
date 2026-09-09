@@ -5,6 +5,8 @@ import { pickOnboarder } from '@/lib/onboarding';
 
 async function handoffState(customerId:string,user:any){
   const sql=db();
+  const schema=await sql`SELECT to_regclass('public.onboarding_cases') IS NOT NULL AS ready`;
+  const ready=Boolean(schema[0]?.ready);
   const calls=await sql`
     SELECT id,customer_id,call_date,event_time,agent_id,agent_name_raw,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot
     FROM calls WHERE customer_id=${customerId}
@@ -12,9 +14,10 @@ async function handoffState(customerId:string,user:any){
   `;
   const latest:any=calls[0]||null;
   const eligible=Boolean(latest && (latest.l1_label_snapshot==='Payment done' || latest.l2_label_snapshot==='Enrolled via WhatsApp'));
+  if(!ready) return {available:false,latest,eligible:false,permitted:false,existingCase:null};
   const open=await sql`SELECT id,assigned_to,current_status FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='open' LIMIT 1`;
   const permitted=Boolean(latest && (latest.agent_id===user.id || isWorkspaceAdmin(user,'seller')));
-  return {latest,eligible,permitted,existingCase:open[0]||null};
+  return {available:true,latest,eligible,permitted,existingCase:open[0]||null};
 }
 
 export async function GET(req:Request){
@@ -23,8 +26,7 @@ export async function GET(req:Request){
   if(!canAccess(user,'seller')) return NextResponse.json({error:'Seller access required'},{status:403});
   const customerId=new URL(req.url).searchParams.get('customerId')?.trim()||'';
   if(!customerId) return NextResponse.json({error:'Customer ID required'},{status:400});
-  const state=await handoffState(customerId,user);
-  return NextResponse.json(state);
+  return NextResponse.json(await handoffState(customerId,user));
 }
 
 export async function POST(req:Request){
@@ -34,6 +36,7 @@ export async function POST(req:Request){
   const body=await req.json(); const customerId=String(body.customerId||'').trim();
   if(!customerId) return NextResponse.json({error:'Customer ID required'},{status:400});
   const state:any=await handoffState(customerId,user);
+  if(!state.available) return NextResponse.json({error:'Onboarding workspace is not enabled yet.'},{status:503});
   if(state.existingCase) return NextResponse.json({error:'This merchant is already with the onboarding team.',caseId:state.existingCase.id},{status:409});
   if(!state.eligible) return NextResponse.json({error:'Only Payment done or Enrolled via WhatsApp cases can be sent to onboarding.'},{status:400});
   if(!state.permitted) return NextResponse.json({error:'Only the seller who logged the conversion or a Seller Admin can hand this case off.'},{status:403});
