@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
-import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { connectionBucket } from '@/lib/status';
 import { classifyCall, hasBucket } from '@/lib/analytics-classification';
+import { currentUserAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
 
 function pct(n:number,d:number){return d?Math.round(n*1000/d)/10:0;}
 
 export async function GET(req: Request) {
-  const agent=await currentAgent();
+  const agent:any=await currentUserAccess();
   if (!agent) return NextResponse.json({error:'Unauthenticated'},{status:401});
-  if (agent.role !== 'admin') return NextResponse.json({error:'Admin access required'},{status:403});
+  if (!isWorkspaceAdmin(agent,'seller')) return NextResponse.json({error:'Seller Admin access required'},{status:403});
 
   const url=new URL(req.url);
   const today=new Date().toISOString().slice(0,10);
@@ -112,7 +112,7 @@ export async function GET(req: Request) {
     onboardingSubscriptionRenewals:renewalRows.length,
     visitsRequested,paymentIssues,technicalIssues,whatsappHandoffs,fbLinkingIssues,
     freshDispositionSplit:toSplit(freshDisp,freshCustomers),
-    repeatDispositionSplit:toSplit(repeatDisp,repeatCustomers),
+    repeatDispositionSplit:toSplit(repeatDisp,freshCustomers?repeatCustomers:repeatCustomers),
     agentPerformance,
     definitions:{
       fresh:'A fresh call is the customer\'s first-ever recorded interaction.',
