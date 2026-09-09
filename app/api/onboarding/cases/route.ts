@@ -9,8 +9,13 @@ export async function GET(req:Request){
   if(!canAccess(user,'onboarding')) return NextResponse.json({error:'Onboarding access required'},{status:403});
   const url=new URL(req.url);
   const scope=url.searchParams.get('scope')||'open';
+  const from=url.searchParams.get('from');
+  const to=url.searchParams.get('to');
+  const assignedTo=url.searchParams.get('assignedTo');
   const sql=db();
   const all=isWorkspaceAdmin(user,'onboarding');
+  const filterByDate=Boolean(all&&from&&to);
+  const filterByAgent=Boolean(all&&assignedTo);
   const cases=await sql`
     SELECT c.id,c.customer_id,c.source_type,c.sale_date,c.assigned_to,c.assigned_at,c.current_l0,c.current_l1,c.current_l2,
       c.current_status,c.next_callback_at,c.last_activity_at,c.ads_live_at,c.closed_at,c.created_at,c.updated_at,
@@ -25,6 +30,17 @@ export async function GET(req:Request){
     LEFT JOIN merchant_information m ON m.customer_id=c.customer_id AND m.active=TRUE
     WHERE (${all} OR c.assigned_to=${user.id}::uuid)
       AND (${scope}='all' OR c.current_status='open')
+      AND (${!filterByAgent} OR c.assigned_to=${assignedTo||null}::uuid)
+      AND (
+        ${!filterByDate}
+        OR (c.created_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from||null}::date AND ${to||null}::date
+        OR (c.closed_at IS NOT NULL AND (c.closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from||null}::date AND ${to||null}::date)
+        OR EXISTS(
+          SELECT 1 FROM onboarding_events e2
+          WHERE e2.onboarding_case_id=c.id
+            AND e2.event_date BETWEEN ${from||null}::date AND ${to||null}::date
+        )
+      )
     ORDER BY
       CASE WHEN c.current_status='open' AND c.next_callback_at IS NOT NULL AND c.next_callback_at < now() THEN 0 ELSE 1 END,
       CASE WHEN c.current_status='open' AND c.last_activity_at IS NULL THEN 0 ELSE 1 END,
