@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { currentUserAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
 
 function csvCell(v: unknown) {
   if (v === null || v === undefined) return '';
@@ -9,9 +9,9 @@ function csvCell(v: unknown) {
 }
 
 export async function GET(req: Request) {
-  const agent = await currentAgent();
+  const agent:any = await currentUserAccess();
   if (!agent) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  if (agent.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  if (!isWorkspaceAdmin(agent,'seller')) return NextResponse.json({ error: 'Seller Admin access required' }, { status: 403 });
 
   const url = new URL(req.url);
   const from = url.searchParams.get('from') || new Date().toISOString().slice(0, 10);
