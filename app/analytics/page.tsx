@@ -1,14 +1,14 @@
 'use client';
 import { useEffect,useState } from 'react';
-import { useRouter,useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 function ymd(d:Date){const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;}
 function shiftDays(base:Date,days:number){const d=new Date(base);d.setDate(d.getDate()+days);return d;}
 
 export default function Analytics(){
- const router=useRouter(),params=useSearchParams(); const now=new Date(),today=ymd(now);
+ const router=useRouter(); const now=new Date(),today=ymd(now);
  const [user,setUser]=useState<any>(null),[workspace,setWorkspace]=useState<'seller'|'onboarding'>('seller'),[from,setFrom]=useState(today),[to,setTo]=useState(today),[data,setData]=useState<any>(null),[loading,setLoading]=useState(false);
- useEffect(()=>{(async()=>{const r=await fetch('/api/auth/access');if(!r.ok){router.replace('/login');return;}const u=(await r.json()).user;setUser(u);const requested=params.get('workspace')==='onboarding'?'onboarding':'seller';const allowed=requested==='seller'?(u.isSuperAdmin||u.access?.seller==='admin'):(u.isSuperAdmin||u.access?.onboarding==='admin');const initial=allowed?requested:(u.isSuperAdmin||u.access?.seller==='admin')?'seller':'onboarding';setWorkspace(initial);await load(initial,today,today);})();},[]);
+ useEffect(()=>{(async()=>{const r=await fetch('/api/auth/access');if(!r.ok){router.replace('/login');return;}const u=(await r.json()).user;setUser(u);const requested=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('workspace')==='onboarding'?'onboarding':'seller';const allowed=requested==='seller'?(u.isSuperAdmin||u.access?.seller==='admin'):(u.isSuperAdmin||u.access?.onboarding==='admin');const initial:('seller'|'onboarding')=allowed?requested:(u.isSuperAdmin||u.access?.seller==='admin')?'seller':'onboarding';setWorkspace(initial);await load(initial,today,today);})();},[]);
  async function load(ws:'seller'|'onboarding',f:string,t:string){setWorkspace(ws);setFrom(f);setTo(t);setLoading(true);setData(null);const url=ws==='seller'?`/api/analytics/daily?from=${f}&to=${t}`:`/api/onboarding/analytics?from=${f}&to=${t}`;const r=await fetch(url,{cache:'no-store'});if(r.ok)setData(await r.json());setLoading(false);}
  function preset(kind:'today'|'yesterday'|'7d'){const current=new Date();if(kind==='today')return load(workspace,ymd(current),ymd(current));if(kind==='yesterday'){const d=shiftDays(current,-1);return load(workspace,ymd(d),ymd(d));}return load(workspace,ymd(shiftDays(current,-6)),ymd(current));}
  if(!user)return <div className="center">Loading…</div>;
