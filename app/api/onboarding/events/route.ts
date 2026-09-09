@@ -13,6 +13,9 @@ export async function POST(req:Request){
   const l1Code=body.l1Code?String(body.l1Code):null;
   const l2Code=body.l2Code?String(body.l2Code):null;
   const remark=String(body.remark||'').trim()||null;
+  const rawTopUp=body.topUpAmount;
+  const topUpAmount=rawTopUp===null||rawTopUp===undefined||String(rawTopUp).trim()===''?null:Number(rawTopUp);
+  if(topUpAmount!==null&&(!Number.isFinite(topUpAmount)||topUpAmount<0)) return NextResponse.json({error:'Top-up amount must be zero or more.'},{status:400});
   if(!caseId||!l0Code) return NextResponse.json({error:'Case and outcome are required.'},{status:400});
   const sql=db();
   try{
@@ -39,8 +42,8 @@ export async function POST(req:Request){
       const attemptRows=await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${caseId}::uuid`;
       const attempt=Number(attemptRows[0]?.n||1);
       await tx`
-        INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l2_code,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at)
-        VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'new_event',${l0Code},${l1Code},${l2Code},${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback})
+        INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l2_code,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr)
+        VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'new_event',${l0Code},${l1Code},${l2Code},${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${topUpAmount})
       `;
       let status='open'; let adsLiveAt:any=null; let closedAt:any=null;
       if(l0Code==='OB_ADS_LIVE'){status='ads_live';adsLiveAt=new Date();closedAt=adsLiveAt;}
