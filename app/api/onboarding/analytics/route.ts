@@ -67,7 +67,7 @@ export async function GET(req:Request){
     ), touched AS (
       SELECT DISTINCT f.id
       FROM flags f
-      JOIN onboarding_events e ON e.case_id=f.id
+      JOIN onboarding_events e ON e.onboarding_case_id=f.id
       WHERE e.source_type IN ('new_event','historical_import')
         AND e.event_date BETWEEN ${from}::date AND ${to}::date
         AND e.event_date >= (f.received_date + 3)
