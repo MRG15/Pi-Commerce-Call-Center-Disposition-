@@ -18,7 +18,9 @@ export async function GET(req:Request){
       )::int AS cases_received,
       COUNT(*) FILTER (WHERE current_status='open')::int AS open_cases,
       COUNT(*) FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS ads_live,
-      COUNT(*) FILTER (WHERE current_status='lost' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS lost,
+      COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Not Interested' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS not_interested,
+      COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Refund Requested' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS refund_requested,
+      COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Not Interested / Refund' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS legacy_not_interested_refund,
       ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (ads_live_at-COALESCE(sale_date::timestamptz,created_at)))/86400.0))
         FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date),1) AS avg_days_to_live,
       COUNT(*) FILTER (WHERE current_status='open' AND (COALESCE(last_activity_at,created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ((now() AT TIME ZONE 'Asia/Kolkata')::date-3))::int AS ageing_cases
