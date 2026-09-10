@@ -47,7 +47,6 @@ export async function POST(req:Request){
         return;
       }
 
-      if(c.current_status!=='open') throw new Error('CASE_CLOSED');
       const codes=[l0Code,l1Code,l2Code].filter(Boolean) as string[];
       const nodes=await tx`SELECT id,code,label,level,parent_id FROM onboarding_disposition_nodes WHERE code=ANY(${codes}) AND active=TRUE`;
       const byCode:any={}; for(const n of nodes) byCode[n.code]=n;
@@ -55,6 +54,21 @@ export async function POST(req:Request){
       if(!l0||l0.level!==0) throw new Error('BAD_TAXONOMY');
       if(l1 && (l1.level!==1 || l1.parent_id!==l0.id)) throw new Error('BAD_TAXONOMY');
       if(l2 && (!l1 || l2.level!==2 || l2.parent_id!==l1.id)) throw new Error('BAD_TAXONOMY');
+
+      const additionalTopUp=l0Code==='OB_ADDITIONAL_TOPUP';
+      if(additionalTopUp){
+        if(c.current_status!=='ads_live') throw new Error('TOPUP_ADS_LIVE_ONLY');
+        if(l1Code||l2Code) throw new Error('BAD_TAXONOMY');
+        if(topUpAmount===null||topUpAmount<=0) throw new Error('TOPUP_REQUIRED');
+        await tx`
+          INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l0_label_snapshot,top_up_amount_inr)
+          VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'new_event',${l0Code},${l0.label},${topUpAmount})
+        `;
+        await tx`UPDATE onboarding_cases SET last_activity_at=now(),updated_at=now() WHERE id=${caseId}::uuid`;
+        return;
+      }
+
+      if(c.current_status!=='open') throw new Error('CASE_CLOSED');
       if(l0Code==='OB_IN_PROCESS' && !l1) throw new Error('L1_REQUIRED');
       if((l0Code==='OB_NOT_INTERESTED'||l0Code==='OB_REFUND_REQUESTED') && !l1) throw new Error('REASON_REQUIRED');
       if(l1Code==='OB_TECHNICAL' && !l2) throw new Error('L2_REQUIRED');
@@ -93,7 +107,7 @@ export async function POST(req:Request){
     return NextResponse.json({ok:true});
   }catch(e:any){
     const code=String(e?.message||'');
-    const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],TECH_NOT_FOUND:['Technical case is already resolved or not found.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400]};
+    const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],TECH_NOT_FOUND:['Technical case is already resolved or not found.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400],TOPUP_REQUIRED:['Enter the additional top-up amount.',400],TOPUP_ADS_LIVE_ONLY:['Additional top-up can only be logged after Ads Live.',409]};
     const hit=map[code]; if(hit) return NextResponse.json({error:hit[0]},{status:hit[1]});
     console.error('onboarding event error',e);
     return NextResponse.json({error:'Could not save onboarding update.'},{status:500});
