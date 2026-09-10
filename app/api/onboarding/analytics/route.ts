@@ -30,8 +30,7 @@ export async function GET(req:Request){
       COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Refund Requested' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS refund_requested,
       COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Not Interested / Refund' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS legacy_not_interested_refund,
       ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (ads_live_at-COALESCE(sale_date::timestamptz,created_at)))/86400.0))
-        FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date),1) AS avg_days_to_live,
-      COUNT(*) FILTER (WHERE current_status='open' AND (COALESCE(last_activity_at,created_at) AT TIME ZONE 'Asia/Kolkata')::date <= ((now() AT TIME ZONE 'Asia/Kolkata')::date-3))::int AS ageing_cases
+        FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date),1) AS avg_days_to_live
     FROM onboarding_cases
   `;
 
@@ -43,6 +42,42 @@ export async function GET(req:Request){
       COUNT(*) FILTER (WHERE source_type='new_event' AND l0_code='OB_SUBS_RENEWED' AND event_date BETWEEN ${from}::date AND ${to}::date)::int AS subscriptions_renewed,
       COALESCE(SUM(top_up_amount_inr) FILTER (WHERE source_type='new_event' AND event_date BETWEEN ${from}::date AND ${to}::date),0)::numeric AS top_up_amount
     FROM onboarding_events
+  `;
+
+  const ageing=await sql`
+    WITH base AS (
+      SELECT c.id,
+        CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END AS received_date,
+        CASE WHEN c.ads_live_at IS NOT NULL THEN (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date END AS ads_live_date,
+        CASE WHEN c.current_status='lost' AND c.closed_at IS NOT NULL THEN (c.closed_at AT TIME ZONE 'Asia/Kolkata')::date END AS lost_date
+      FROM onboarding_cases c
+    ), flags AS (
+      SELECT b.*,
+        (
+          b.received_date <= (${to}::date - 3)
+          AND (b.ads_live_date IS NULL OR b.ads_live_date > ${to}::date)
+          AND (b.lost_date IS NULL OR b.lost_date > ${to}::date)
+        ) AS ageing_open_as_on,
+        (
+          (b.ads_live_date BETWEEN ${from}::date AND ${to}::date AND b.received_date <= (b.ads_live_date - 3))
+          OR
+          (b.lost_date BETWEEN ${from}::date AND ${to}::date AND b.received_date <= (b.lost_date - 3))
+        ) AS ageing_closed_in_range
+      FROM base b
+    ), touched AS (
+      SELECT DISTINCT f.id
+      FROM flags f
+      JOIN onboarding_events e ON e.case_id=f.id
+      WHERE e.source_type IN ('new_event','historical_import')
+        AND e.event_date BETWEEN ${from}::date AND ${to}::date
+        AND e.event_date >= (f.received_date + 3)
+        AND (f.ageing_open_as_on OR f.ageing_closed_in_range)
+    )
+    SELECT
+      COUNT(*) FILTER (WHERE ageing_open_as_on)::int AS ageing_open_cases,
+      (SELECT COUNT(*)::int FROM touched) AS ageing_cases_touched,
+      COUNT(*) FILTER (WHERE ageing_closed_in_range)::int AS ageing_cases_closed
+    FROM flags
   `;
 
   const tech=await sql`
@@ -74,5 +109,5 @@ export async function GET(req:Request){
   `;
 
   const s:any=summary[0]||{}; const asOnReceived=Number(s.as_on_cases_received||0); const asOnAds=Number(s.as_on_ads_live||0);
-  return NextResponse.json({...s,...(events[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
+  return NextResponse.json({...s,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
 }
