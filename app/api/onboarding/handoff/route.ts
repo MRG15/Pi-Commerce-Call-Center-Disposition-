@@ -15,9 +15,9 @@ async function handoffState(customerId:string,user:any){
   const latest:any=calls[0]||null;
   const eligible=Boolean(latest && (latest.l1_label_snapshot==='Payment done' || latest.l2_label_snapshot==='Enrolled via WhatsApp'));
   if(!ready) return {available:false,latest,eligible:false,permitted:false,existingCase:null};
-  const open=await sql`SELECT id,assigned_to,current_status FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='open' LIMIT 1`;
+  const existing=await sql`SELECT id,assigned_to,current_status FROM onboarding_cases WHERE customer_id=${customerId} LIMIT 1`;
   const permitted=Boolean(latest && (latest.agent_id===user.id || isWorkspaceAdmin(user,'seller')));
-  return {available:true,latest,eligible,permitted,existingCase:open[0]||null};
+  return {available:true,latest,eligible,permitted,existingCase:existing[0]||null};
 }
 
 export async function GET(req:Request){
