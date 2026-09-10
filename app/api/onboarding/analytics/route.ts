@@ -16,8 +16,14 @@ export async function GET(req:Request){
         WHERE (CASE WHEN source_type='historical_import' THEN sale_date ELSE (created_at AT TIME ZONE 'Asia/Kolkata')::date END)
           BETWEEN ${from}::date AND ${to}::date
       )::int AS cases_received,
-      COUNT(*)::int AS all_time_cases_received,
-      COUNT(*) FILTER (WHERE ads_live_at IS NOT NULL)::int AS all_time_ads_live,
+      COUNT(*) FILTER (
+        WHERE (CASE WHEN source_type='historical_import' THEN sale_date ELSE (created_at AT TIME ZONE 'Asia/Kolkata')::date END)
+          <= ${to}::date
+      )::int AS as_on_cases_received,
+      COUNT(*) FILTER (
+        WHERE ads_live_at IS NOT NULL
+          AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
+      )::int AS as_on_ads_live,
       COUNT(*) FILTER (WHERE current_status='open')::int AS open_cases,
       COUNT(*) FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS ads_live,
       COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Not Interested' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS not_interested,
@@ -67,6 +73,6 @@ export async function GET(req:Request){
     ORDER BY ads_live DESC,a.name
   `;
 
-  const s:any=summary[0]||{}; const allTimeReceived=Number(s.all_time_cases_received||0); const allTimeAds=Number(s.all_time_ads_live||0);
-  return NextResponse.json({...s,...(events[0]||{}),...(tech[0]||{}),ads_live_rate:allTimeReceived?Math.round(allTimeAds*1000/allTimeReceived)/10:0,agentPerformance:agents});
+  const s:any=summary[0]||{}; const asOnReceived=Number(s.as_on_cases_received||0); const asOnAds=Number(s.as_on_ads_live||0);
+  return NextResponse.json({...s,...(events[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
 }
