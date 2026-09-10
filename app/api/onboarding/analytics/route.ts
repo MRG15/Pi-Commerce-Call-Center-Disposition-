@@ -24,7 +24,11 @@ export async function GET(req:Request){
         WHERE ads_live_at IS NOT NULL
           AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
       )::int AS as_on_ads_live,
-      COUNT(*) FILTER (WHERE current_status='open')::int AS open_cases,
+      COUNT(*) FILTER (
+        WHERE (CASE WHEN source_type='historical_import' THEN sale_date ELSE (created_at AT TIME ZONE 'Asia/Kolkata')::date END) <= ${to}::date
+          AND (COALESCE((closed_at AT TIME ZONE 'Asia/Kolkata')::date,(ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) IS NULL
+            OR COALESCE((closed_at AT TIME ZONE 'Asia/Kolkata')::date,(ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) > ${to}::date)
+      )::int AS open_cases,
       COUNT(*) FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS ads_live,
       COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Not Interested' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS not_interested,
       COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Refund Requested' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS refund_requested,
@@ -82,7 +86,10 @@ export async function GET(req:Request){
 
   const tech=await sql`
     SELECT
-      COUNT(*) FILTER (WHERE status='open')::int AS technical_open,
+      COUNT(*) FILTER (
+        WHERE (opened_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
+          AND (resolved_at IS NULL OR (resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)
+      )::int AS technical_open,
       COUNT(*) FILTER (WHERE (opened_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS in_process,
       COUNT(*) FILTER (WHERE status='resolved' AND resolved_at IS NOT NULL AND (resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS technical_resolved
     FROM technical_cases
@@ -93,9 +100,14 @@ export async function GET(req:Request){
       (SELECT COUNT(*)::int FROM onboarding_cases c WHERE c.assigned_to=a.id AND
         (CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END)
         BETWEEN ${from}::date AND ${to}::date) AS assigned,
-      (SELECT COUNT(*)::int FROM onboarding_cases c WHERE c.assigned_to=a.id AND c.current_status='open') AS open,
+      (SELECT COUNT(*)::int FROM onboarding_cases c WHERE c.assigned_to=a.id
+        AND (CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END) <= ${to}::date
+        AND (COALESCE((c.closed_at AT TIME ZONE 'Asia/Kolkata')::date,(c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) IS NULL
+          OR COALESCE((c.closed_at AT TIME ZONE 'Asia/Kolkata')::date,(c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) > ${to}::date)) AS open,
       (SELECT COUNT(*)::int FROM onboarding_cases c WHERE c.assigned_to=a.id AND c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS ads_live,
-      (SELECT COUNT(*)::int FROM technical_cases t WHERE t.assigned_to=a.id AND t.status='open') AS tech_open,
+      (SELECT COUNT(*)::int FROM technical_cases t WHERE t.assigned_to=a.id
+        AND (t.opened_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
+        AND (t.resolved_at IS NULL OR (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)) AS tech_open,
       (SELECT COUNT(*)::int FROM technical_cases t WHERE t.assigned_to=a.id AND t.status='resolved' AND t.resolved_at IS NOT NULL AND (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS tech_resolved,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','historical_import') AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS touches,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.l0_code='OB_SUBS_RENEWED' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS subscriptions_renewed,
