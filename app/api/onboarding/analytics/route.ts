@@ -29,6 +29,7 @@ export async function GET(req:Request){
     SELECT
       COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND event_date BETWEEN ${from}::date AND ${to}::date)::int AS touches,
       COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND event_date BETWEEN ${from}::date AND ${to}::date AND l0_label_snapshot IS NOT NULL AND l0_label_snapshot<>'Not Connected')::int AS connected,
+      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND event_date BETWEEN ${from}::date AND ${to}::date AND callback_at IS NOT NULL)::int AS callbacks_scheduled,
       COUNT(*) FILTER (WHERE source_type='new_event' AND l0_code='OB_SUBS_RENEWED' AND event_date BETWEEN ${from}::date AND ${to}::date)::int AS subscriptions_renewed,
       COALESCE(SUM(top_up_amount_inr) FILTER (WHERE source_type='new_event' AND event_date BETWEEN ${from}::date AND ${to}::date),0)::numeric AS top_up_amount
     FROM onboarding_events
@@ -37,6 +38,7 @@ export async function GET(req:Request){
   const tech=await sql`
     SELECT
       COUNT(*) FILTER (WHERE status='open')::int AS technical_open,
+      COUNT(*) FILTER (WHERE (opened_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS in_process,
       COUNT(*) FILTER (WHERE status='resolved' AND resolved_at IS NOT NULL AND (resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS technical_resolved
     FROM technical_cases
   `;
