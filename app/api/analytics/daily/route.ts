@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
-import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { connectionBucket } from '@/lib/status';
 import { classifyCall, hasBucket } from '@/lib/analytics-classification';
+import { currentUserAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
 
 function pct(n:number,d:number){return d?Math.round(n*1000/d)/10:0;}
 
 export async function GET(req: Request) {
-  const agent=await currentAgent();
+  const agent:any=await currentUserAccess();
   if (!agent) return NextResponse.json({error:'Unauthenticated'},{status:401});
-  if (agent.role !== 'admin') return NextResponse.json({error:'Admin access required'},{status:403});
+  if (!isWorkspaceAdmin(agent,'seller')) return NextResponse.json({error:'Seller Admin access required'},{status:403});
 
   const url=new URL(req.url);
   const today=new Date().toISOString().slice(0,10);
@@ -33,16 +33,27 @@ export async function GET(req: Request) {
     ORDER BY c.customer_id,c.call_date,c.call_seq,c.attempt_number
   `;
 
+  let renewalRows:any[]=[];
+  try{
+    renewalRows=await sql`
+      SELECT e.customer_id,e.event_date,COALESCE(a.name,e.agent_name_raw,'Unknown') AS agent_name
+      FROM onboarding_events e
+      LEFT JOIN agents a ON a.id=e.agent_id
+      WHERE e.l0_code='OB_SUBS_RENEWED'
+        AND e.event_date BETWEEN ${from}::date AND ${to}::date
+        AND e.source_type='new_event'
+    `;
+  }catch{}
+
   const totalAttempts=rows.length;
   const uniqueAttempted=new Set(rows.map((r:any)=>r.customer_id)).size;
   const connected=rows.filter((r:any)=>connectionBucket(r.l0_label_snapshot||r.status_raw)==='connected').length;
   const notConnected=rows.filter((r:any)=>connectionBucket(r.l0_label_snapshot||r.status_raw)==='not_connected').length;
   const unknownConnection=totalAttempts-connected-notConnected;
-
   const count=(bucket:any)=>rows.filter((r:any)=>hasBucket(r,bucket)).length;
   const callbackRequested=count('CALLBACK');
   const interested=count('INTERESTED');
-  const paymentDone=count('PAYMENT_DONE');
+  const paymentDone=count('PAYMENT_DONE')+renewalRows.length;
   const visitsRequested=count('VISIT_REQUESTED');
   const paymentIssues=count('PAYMENT_ISSUE');
   const technicalIssues=count('TECHNICAL_ISSUE');
@@ -75,11 +86,17 @@ export async function GET(req: Request) {
     if(buckets.has('WHATSAPP_HANDOFF'))x.whatsappHandoffs++;
     agentMap.set(k,x);
   }
+  for(const r of renewalRows){
+    const k=r.agent_name||'Unknown';
+    const x=agentMap.get(k)||{attempts:0,unique:new Set<string>(),connected:0,interested:0,paymentDone:0,callbacks:0,paymentIssues:0,technicalIssues:0,whatsappHandoffs:0};
+    x.paymentDone++;
+    agentMap.set(k,x);
+  }
   const agentPerformance=[...agentMap.entries()].map(([name,x])=>({
     name,attempts:x.attempts,unique:x.unique.size,connected:x.connected,connectRate:pct(x.connected,x.attempts),
     interested:x.interested,paymentDone:x.paymentDone,callbacks:x.callbacks,paymentIssues:x.paymentIssues,
     technicalIssues:x.technicalIssues,whatsappHandoffs:x.whatsappHandoffs
-  })).sort((a,b)=>b.attempts-a.attempts);
+  })).sort((a,b)=>b.attempts-a.attempts||b.paymentDone-a.paymentDone);
 
   return NextResponse.json({
     from,to,totalAttempts,uniqueAttempted,freshCustomers,repeatCustomers,
@@ -87,7 +104,8 @@ export async function GET(req: Request) {
     connectRateKnownDenominator:(connected+notConnected)?pct(connected,connected+notConnected):null,
     callbackRequested,callbackRate:pct(callbackRequested,totalAttempts),
     interested,interestedRate:pct(interested,totalAttempts),
-    paymentDone,paymentRate:pct(paymentDone,totalAttempts),
+    paymentDone,paymentRate:pct(paymentDone,totalAttempts+renewalRows.length),
+    onboardingSubscriptionRenewals:renewalRows.length,
     visitsRequested,paymentIssues,technicalIssues,whatsappHandoffs,fbLinkingIssues,
     freshDispositionSplit:toSplit(freshDisp,freshCustomers),
     repeatDispositionSplit:toSplit(repeatDisp,repeatCustomers),
@@ -98,6 +116,7 @@ export async function GET(req: Request) {
       dispositionSplit:'Fresh/repeat splits use the actual taxonomy/status on each call. Remarks are never used as dispositions.',
       connectRate:'Conservative: known connected/not-connected outcomes only. Unknown legacy outcomes are excluded.',
       semanticBuckets:'Quick Answers classifies approved disposition/status labels across L0, L1 or L2; it never scans free-text remarks.',
+      subscriptionRenewal:'Only the explicit Onboarding outcome Subscription Renewed is added to Seller Payment Done. No other onboarding activity affects Seller analytics.',
       visitsRequested:'Only date-attributable call dispositions are counted; legacy customer-level flags are not assigned to a guessed call date.'
     }
   });
