@@ -21,10 +21,33 @@ export async function GET(req:Request){
       c.current_status,c.next_callback_at,c.last_activity_at,c.ads_live_at,c.closed_at,c.created_at,c.updated_at,
       a.name AS assigned_name,
       m.merchant_name,m.phone_number,m.category,m.sub_category,
-      GREATEST(0,((now() AT TIME ZONE 'Asia/Kolkata')::date-COALESCE(c.sale_date,(c.created_at AT TIME ZONE 'Asia/Kolkata')::date)))::int AS days_since_sale,
-      CASE WHEN c.last_activity_at IS NULL THEN NULL ELSE GREATEST(0,((now() AT TIME ZONE 'Asia/Kolkata')::date-(c.last_activity_at AT TIME ZONE 'Asia/Kolkata')::date))::int END AS days_since_last_activity,
+      GREATEST(0,(
+        CASE WHEN ${filterByDate} THEN ${to||null}::date ELSE (now() AT TIME ZONE 'Asia/Kolkata')::date END
+        - COALESCE(c.sale_date,(c.created_at AT TIME ZONE 'Asia/Kolkata')::date)
+      ))::int AS days_since_sale,
+      CASE WHEN c.last_activity_at IS NULL THEN NULL ELSE GREATEST(0,(
+        CASE WHEN ${filterByDate} THEN ${to||null}::date ELSE (now() AT TIME ZONE 'Asia/Kolkata')::date END
+        - (c.last_activity_at AT TIME ZONE 'Asia/Kolkata')::date
+      ))::int END AS days_since_last_activity,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.source_type IN ('new_event','historical_import')) AS touches,
-      EXISTS(SELECT 1 FROM technical_cases t WHERE t.onboarding_case_id=c.id AND t.status='open') AS has_open_technical
+      CASE WHEN ${filterByDate} THEN
+        (
+          (CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END) <= ${to||null}::date
+          AND (COALESCE((c.closed_at AT TIME ZONE 'Asia/Kolkata')::date,(c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) IS NULL
+            OR COALESCE((c.closed_at AT TIME ZONE 'Asia/Kolkata')::date,(c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) > ${to||null}::date)
+        )
+      ELSE c.current_status='open' END AS is_open_as_on,
+      EXISTS(
+        SELECT 1 FROM technical_cases t
+        WHERE t.onboarding_case_id=c.id
+          AND (
+            (${filterByDate} AND (t.opened_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to||null}::date
+              AND (t.resolved_at IS NULL OR (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to||null}::date))
+            OR
+            (${!filterByDate} AND t.status='open')
+          )
+          AND (c.ads_live_at IS NULL OR (${filterByDate} AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date > ${to||null}::date))
+      ) AS has_open_technical
     FROM onboarding_cases c
     LEFT JOIN agents a ON a.id=c.assigned_to
     LEFT JOIN merchant_information m ON m.customer_id=c.customer_id AND m.active=TRUE
@@ -39,6 +62,18 @@ export async function GET(req:Request){
           SELECT 1 FROM onboarding_events e2
           WHERE e2.onboarding_case_id=c.id
             AND e2.event_date BETWEEN ${from||null}::date AND ${to||null}::date
+        )
+        OR (
+          (CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END) <= (${to||null}::date - 3)
+          AND (c.ads_live_at IS NULL OR (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date > ${to||null}::date)
+          AND (c.current_status<>'lost' OR c.closed_at IS NULL OR (c.closed_at AT TIME ZONE 'Asia/Kolkata')::date > ${to||null}::date)
+        )
+        OR EXISTS(
+          SELECT 1 FROM technical_cases t2
+          WHERE t2.onboarding_case_id=c.id
+            AND (t2.opened_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to||null}::date
+            AND (t2.resolved_at IS NULL OR (t2.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to||null}::date)
+            AND (c.ads_live_at IS NULL OR (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date > ${to||null}::date)
         )
       )
     ORDER BY
