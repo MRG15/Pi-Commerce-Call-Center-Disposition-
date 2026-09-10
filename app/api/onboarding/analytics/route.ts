@@ -92,11 +92,13 @@ export async function GET(req:Request){
   const tech=await sql`
     SELECT
       COUNT(*) FILTER (
-        WHERE (opened_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
-          AND (resolved_at IS NULL OR (resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)
+        WHERE (t.opened_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
+          AND (t.resolved_at IS NULL OR (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)
+          AND (c.ads_live_at IS NULL OR (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)
       )::int AS technical_open,
-      COUNT(*) FILTER (WHERE status='resolved' AND resolved_at IS NOT NULL AND (resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS technical_resolved
-    FROM technical_cases
+      COUNT(*) FILTER (WHERE t.status='resolved' AND t.resolved_at IS NOT NULL AND (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS technical_resolved
+    FROM technical_cases t
+    JOIN onboarding_cases c ON c.id=t.onboarding_case_id
   `;
 
   const agents=await sql`
@@ -109,9 +111,10 @@ export async function GET(req:Request){
         AND (COALESCE((c.closed_at AT TIME ZONE 'Asia/Kolkata')::date,(c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) IS NULL
           OR COALESCE((c.closed_at AT TIME ZONE 'Asia/Kolkata')::date,(c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) > ${to}::date)) AS open,
       (SELECT COUNT(*)::int FROM onboarding_cases c WHERE c.assigned_to=a.id AND c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS ads_live,
-      (SELECT COUNT(*)::int FROM technical_cases t WHERE t.assigned_to=a.id
+      (SELECT COUNT(*)::int FROM technical_cases t JOIN onboarding_cases c ON c.id=t.onboarding_case_id WHERE t.assigned_to=a.id
         AND (t.opened_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
-        AND (t.resolved_at IS NULL OR (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)) AS tech_open,
+        AND (t.resolved_at IS NULL OR (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)
+        AND (c.ads_live_at IS NULL OR (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)) AS tech_open,
       (SELECT COUNT(*)::int FROM technical_cases t WHERE t.assigned_to=a.id AND t.status='resolved' AND t.resolved_at IS NOT NULL AND (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS tech_resolved,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','historical_import') AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS touches,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.l0_code='OB_SUBS_RENEWED' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS subscriptions_renewed,
