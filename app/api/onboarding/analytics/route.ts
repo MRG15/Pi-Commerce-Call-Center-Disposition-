@@ -56,7 +56,7 @@ export async function GET(req:Request){
   const ageing=await sql`
     WITH base AS (
       SELECT c.id,
-        CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END AS received_date,
+        c.sale_date AS received_date,
         CASE WHEN c.ads_live_at IS NOT NULL THEN (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date END AS ads_live_date,
         CASE WHEN c.current_status='lost' AND c.closed_at IS NOT NULL THEN (c.closed_at AT TIME ZONE 'Asia/Kolkata')::date END AS lost_date
       FROM onboarding_cases c
