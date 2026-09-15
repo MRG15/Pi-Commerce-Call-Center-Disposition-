@@ -92,8 +92,8 @@ export async function POST(req:Request){
   const customerId=String(body.customerId||'').trim();
   if(!/^\d+$/.test(customerId)) return NextResponse.json({error:'A numeric customer ID is required.'},{status:400});
   const sql=db();
-  const existing=await sql`SELECT id,assigned_to,current_status FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='open' LIMIT 1`;
-  if(existing[0]) return NextResponse.json({error:'This merchant already has an open onboarding case.',caseId:existing[0].id},{status:409});
+  const existing=await sql`SELECT id,assigned_to,current_status FROM onboarding_cases WHERE customer_id=${customerId} ORDER BY created_at ASC LIMIT 1`;
+  if(existing[0]) return NextResponse.json({error:'This merchant already exists in Onboarding.',caseId:existing[0].id,status:existing[0].current_status},{status:409});
   const assignee:any=await pickOnboarder(body.assignedTo?String(body.assignedTo):null);
   if(!assignee) return NextResponse.json({error:'No active onboarder is available. Give at least one user Onboarding Agent/Admin access.'},{status:400});
   await sql`INSERT INTO customers(customer_id) VALUES(${customerId}) ON CONFLICT (customer_id) DO NOTHING`;
