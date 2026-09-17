@@ -23,18 +23,30 @@ export async function GET(req:Request){
       COUNT(*) FILTER (
         WHERE ads_live_at IS NOT NULL
           AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
+          AND NOT EXISTS (SELECT 1 FROM onboarding_events eext WHERE eext.onboarding_case_id=onboarding_cases.id AND eext.source_type='system' AND eext.l0_code='SYSTEM_EXTERNAL_ADS_LIVE')
       )::int AS as_on_ads_live,
       COUNT(*) FILTER (
         WHERE (CASE WHEN source_type='historical_import' THEN sale_date ELSE (created_at AT TIME ZONE 'Asia/Kolkata')::date END) <= ${to}::date
           AND (COALESCE((closed_at AT TIME ZONE 'Asia/Kolkata')::date,(ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) IS NULL
             OR COALESCE((closed_at AT TIME ZONE 'Asia/Kolkata')::date,(ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) > ${to}::date)
       )::int AS open_cases,
-      COUNT(*) FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS ads_live,
+      COUNT(*) FILTER (
+        WHERE ads_live_at IS NOT NULL
+          AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
+          AND NOT EXISTS (SELECT 1 FROM onboarding_events eext WHERE eext.onboarding_case_id=onboarding_cases.id AND eext.source_type='system' AND eext.l0_code='SYSTEM_EXTERNAL_ADS_LIVE')
+      )::int AS ads_live,
+      COUNT(*) FILTER (
+        WHERE ads_live_at IS NOT NULL
+          AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
+          AND EXISTS (SELECT 1 FROM onboarding_events eext WHERE eext.onboarding_case_id=onboarding_cases.id AND eext.source_type='system' AND eext.l0_code='SYSTEM_EXTERNAL_ADS_LIVE')
+      )::int AS external_ads_live,
       COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Not Interested' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS not_interested,
       COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Refund Requested' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS refund_requested,
       COUNT(*) FILTER (WHERE current_status='lost' AND current_l0='Not Interested / Refund' AND closed_at IS NOT NULL AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date)::int AS legacy_not_interested_refund,
       ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (ads_live_at-COALESCE(sale_date::timestamptz,created_at)))/86400.0))
-        FILTER (WHERE ads_live_at IS NOT NULL AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date),1) AS avg_days_to_live
+        FILTER (WHERE ads_live_at IS NOT NULL
+          AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
+          AND NOT EXISTS (SELECT 1 FROM onboarding_events eext WHERE eext.onboarding_case_id=onboarding_cases.id AND eext.source_type='system' AND eext.l0_code='SYSTEM_EXTERNAL_ADS_LIVE')),1) AS avg_days_to_live
     FROM onboarding_cases
   `;
 
