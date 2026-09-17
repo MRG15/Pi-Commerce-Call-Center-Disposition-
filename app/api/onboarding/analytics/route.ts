@@ -110,7 +110,8 @@ export async function GET(req:Request){
         AND (CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END) <= ${to}::date
         AND (COALESCE((c.closed_at AT TIME ZONE 'Asia/Kolkata')::date,(c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) IS NULL
           OR COALESCE((c.closed_at AT TIME ZONE 'Asia/Kolkata')::date,(c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date) > ${to}::date)) AS open,
-      (SELECT COUNT(*)::int FROM onboarding_cases c WHERE c.assigned_to=a.id AND c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS ads_live,
+      (SELECT COUNT(*)::int FROM onboarding_cases c WHERE c.assigned_to=a.id AND c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
+        AND NOT EXISTS (SELECT 1 FROM onboarding_events eext WHERE eext.onboarding_case_id=c.id AND eext.source_type='system' AND eext.l0_code='SYSTEM_EXTERNAL_ADS_LIVE')) AS ads_live,
       (SELECT COUNT(*)::int FROM technical_cases t JOIN onboarding_cases c ON c.id=t.onboarding_case_id WHERE t.assigned_to=a.id
         AND (t.opened_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
         AND (t.resolved_at IS NULL OR (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)
@@ -120,7 +121,8 @@ export async function GET(req:Request){
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.l0_code='OB_SUBS_RENEWED' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS subscriptions_renewed,
       (SELECT COALESCE(SUM(e.top_up_amount_inr),0)::numeric FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS top_up_amount,
       (SELECT ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (c.ads_live_at-COALESCE(c.sale_date::timestamptz,c.created_at)))/86400.0)),1)
-         FROM onboarding_cases c WHERE c.assigned_to=a.id AND c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS avg_tat
+         FROM onboarding_cases c WHERE c.assigned_to=a.id AND c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
+           AND NOT EXISTS (SELECT 1 FROM onboarding_events eext WHERE eext.onboarding_case_id=c.id AND eext.source_type='system' AND eext.l0_code='SYSTEM_EXTERNAL_ADS_LIVE')) AS avg_tat
     FROM agents a
     JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding'
     WHERE a.active=TRUE
