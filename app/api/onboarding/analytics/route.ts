@@ -23,7 +23,6 @@ export async function GET(req:Request){
       COUNT(*) FILTER (
         WHERE ads_live_at IS NOT NULL
           AND (ads_live_at AT TIME ZONE 'Asia/Kolkata')::date <= ${to}::date
-          AND NOT EXISTS (SELECT 1 FROM onboarding_events eext WHERE eext.onboarding_case_id=onboarding_cases.id AND eext.source_type='system' AND eext.l0_code='SYSTEM_EXTERNAL_ADS_LIVE')
       )::int AS as_on_ads_live,
       COUNT(*) FILTER (
         WHERE (CASE WHEN source_type='historical_import' THEN sale_date ELSE (created_at AT TIME ZONE 'Asia/Kolkata')::date END) <= ${to}::date
