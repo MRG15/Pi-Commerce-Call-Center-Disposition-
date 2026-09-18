@@ -7,6 +7,7 @@ export async function POST(req:Request){
   const user:any=await currentUserAccess();
   if(!user) return NextResponse.json({error:'Unauthenticated'},{status:401});
   if(!canAccess(user,'onboarding')) return NextResponse.json({error:'Onboarding access required'},{status:403});
+  const customerSuccess=user.access?.onboarding==='customer_success';
   const body=await req.json();
   const caseId=String(body.caseId||'');
   const l0Code=String(body.l0Code||'');
@@ -56,6 +57,11 @@ export async function POST(req:Request){
       if(l2 && (!l1 || l2.level!==2 || l2.parent_id!==l1.id)) throw new Error('BAD_TAXONOMY');
 
       const additionalTopUp=l0Code==='OB_ADDITIONAL_TOPUP';
+      const postLiveOutcome=l0Code==='OB_ANOTHER_AD_LIVE'||l0Code==='OB_CREATIVE_UPDATED';
+      const customerSuccessFollowUp=customerSuccess&&c.current_status==='ads_live';
+      if(postLiveOutcome&&!customerSuccess) throw new Error('CS_ONLY');
+      if(postLiveOutcome&&c.current_status!=='ads_live') throw new Error('POST_LIVE_ONLY');
+      if(postLiveOutcome&&(l1Code||l2Code)) throw new Error('BAD_TAXONOMY');
       if(additionalTopUp){
         if(c.current_status!=='ads_live') throw new Error('TOPUP_ADS_LIVE_ONLY');
         if(l1Code||l2Code) throw new Error('BAD_TAXONOMY');
@@ -68,7 +74,7 @@ export async function POST(req:Request){
         return;
       }
 
-      if(c.current_status!=='open') throw new Error('CASE_CLOSED');
+      if(c.current_status!=='open'&&!customerSuccessFollowUp) throw new Error('CASE_CLOSED');
       if(l0Code==='OB_IN_PROCESS' && !l1) throw new Error('L1_REQUIRED');
       if((l0Code==='OB_NOT_INTERESTED'||l0Code==='OB_REFUND_REQUESTED') && !l1) throw new Error('REASON_REQUIRED');
       if(l1Code==='OB_TECHNICAL' && !l2) throw new Error('L2_REQUIRED');
@@ -81,14 +87,23 @@ export async function POST(req:Request){
         INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l2_code,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr)
         VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'new_event',${l0Code},${l1Code},${l2Code},${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${topUpAmount})
       `;
-      let status='open'; let adsLiveAt:any=null; let closedAt:any=null;
-      if(l0Code==='OB_ADS_LIVE'){status='ads_live';adsLiveAt=new Date();closedAt=adsLiveAt;}
-      if(l0Code==='OB_NOT_INTERESTED'||l0Code==='OB_REFUND_REQUESTED'){status='lost';closedAt=new Date();}
-      await tx`
-        UPDATE onboarding_cases SET current_l0=${l0.label},current_l1=${l1?.label||null},current_l2=${l2?.label||null},
-          current_status=${status},next_callback_at=${callback},last_activity_at=now(),ads_live_at=${adsLiveAt},closed_at=${closedAt},updated_at=now()
-        WHERE id=${caseId}::uuid
-      `;
+
+      if(customerSuccessFollowUp){
+        if(callback){
+          await tx`UPDATE onboarding_cases SET next_callback_at=${callback},last_activity_at=now(),updated_at=now() WHERE id=${caseId}::uuid`;
+        }else{
+          await tx`UPDATE onboarding_cases SET last_activity_at=now(),updated_at=now() WHERE id=${caseId}::uuid`;
+        }
+      }else{
+        let status='open'; let adsLiveAt:any=null; let closedAt:any=null;
+        if(l0Code==='OB_ADS_LIVE'){status='ads_live';adsLiveAt=new Date();closedAt=adsLiveAt;}
+        if(l0Code==='OB_NOT_INTERESTED'||l0Code==='OB_REFUND_REQUESTED'){status='lost';closedAt=new Date();}
+        await tx`
+          UPDATE onboarding_cases SET current_l0=${l0.label},current_l1=${l1?.label||null},current_l2=${l2?.label||null},
+            current_status=${status},next_callback_at=${callback},last_activity_at=now(),ads_live_at=${adsLiveAt},closed_at=${closedAt},updated_at=now()
+          WHERE id=${caseId}::uuid
+        `;
+      }
       if(l1Code==='OB_TECHNICAL'){
         const openTech=await tx`SELECT id FROM technical_cases WHERE onboarding_case_id=${caseId}::uuid AND status='open' LIMIT 1`;
         if(openTech[0]){
@@ -107,7 +122,7 @@ export async function POST(req:Request){
     return NextResponse.json({ok:true});
   }catch(e:any){
     const code=String(e?.message||'');
-    const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],TECH_NOT_FOUND:['Technical case is already resolved or not found.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400],TOPUP_REQUIRED:['Enter the additional top-up amount.',400],TOPUP_ADS_LIVE_ONLY:['Additional top-up can only be logged after Ads Live.',409]};
+    const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],TECH_NOT_FOUND:['Technical case is already resolved or not found.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400],TOPUP_REQUIRED:['Enter the additional top-up amount.',400],TOPUP_ADS_LIVE_ONLY:['Additional top-up can only be logged after Ads Live.',409],CS_ONLY:['This outcome is available only to Customer Success.',403],POST_LIVE_ONLY:['This outcome can only be logged after the first ad is live.',409]};
     const hit=map[code]; if(hit) return NextResponse.json({error:hit[0]},{status:hit[1]});
     console.error('onboarding event error',e);
     return NextResponse.json({error:'Could not save onboarding update.'},{status:500});
