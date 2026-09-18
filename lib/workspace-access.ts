@@ -2,7 +2,7 @@ import { currentAgent } from './auth';
 import { db } from './db';
 
 export type Workspace = 'seller'|'onboarding';
-export type WorkspaceRole = 'agent'|'admin'|null;
+export type WorkspaceRole = 'agent'|'customer_success'|'admin'|null;
 
 export async function currentUserAccess(){
   const agent:any=await currentAgent();
@@ -37,4 +37,8 @@ export function canAccess(user:any,workspace:Workspace){
 
 export function isWorkspaceAdmin(user:any,workspace:Workspace){
   return Boolean(user?.isSuperAdmin || user?.access?.[workspace]==='admin');
+}
+
+export function canManageAllOnboardingCases(user:any){
+  return Boolean(user?.isSuperAdmin || user?.access?.onboarding==='admin' || user?.access?.onboarding==='customer_success');
 }

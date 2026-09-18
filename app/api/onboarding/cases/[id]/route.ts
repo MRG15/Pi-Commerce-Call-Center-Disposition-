@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { currentUserAccess,canAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
+import { currentUserAccess,canAccess,isWorkspaceAdmin,canManageAllOnboardingCases } from '@/lib/workspace-access';
 import { pickOnboarder,nextOnboardingAttempt } from '@/lib/onboarding';
 
 export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
@@ -17,7 +17,7 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
   `;
   const c:any=rows[0];
   if(!c) return NextResponse.json({error:'Case not found'},{status:404});
-  if(!isWorkspaceAdmin(user,'onboarding') && c.assigned_to!==user.id) return NextResponse.json({error:'This case is assigned to another onboarder.'},{status:403});
+  if(!canManageAllOnboardingCases(user) && c.assigned_to!==user.id) return NextResponse.json({error:'This case is assigned to another onboarder.'},{status:403});
   const events=await sql`
     SELECT e.*,a.name AS agent_name
     FROM onboarding_events e LEFT JOIN agents a ON a.id=e.agent_id
