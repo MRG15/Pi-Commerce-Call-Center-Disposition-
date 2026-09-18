@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { currentUserAccess,canAccess,isWorkspaceAdmin,canManageAllOnboardingCases } from '@/lib/workspace-access';
+import { currentUserAccess,canAccess,canManageAllOnboardingCases } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
 
 export async function POST(req:Request){
