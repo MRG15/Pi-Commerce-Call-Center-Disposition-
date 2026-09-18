@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { currentUserAccess,canAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
+import { currentUserAccess,canAccess,isWorkspaceAdmin,canManageAllOnboardingCases } from '@/lib/workspace-access';
 import { pickOnboarder } from '@/lib/onboarding';
 
 export async function GET(req:Request){
@@ -13,7 +13,7 @@ export async function GET(req:Request){
   const to=url.searchParams.get('to');
   const assignedTo=url.searchParams.get('assignedTo');
   const sql=db();
-  const all=isWorkspaceAdmin(user,'onboarding');
+  const all=canManageAllOnboardingCases(user);
   const filterByDate=Boolean(all&&from&&to);
   const filterByAgent=Boolean(all&&assignedTo);
   const cases=await sql`
