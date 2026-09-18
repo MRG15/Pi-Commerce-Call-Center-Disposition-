@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { currentUserAccess,canAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
+import { currentUserAccess,canAccess,isWorkspaceAdmin,canManageAllOnboardingCases } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
 
 export async function POST(req:Request){
@@ -26,7 +26,7 @@ export async function POST(req:Request){
       const caseRows=await tx`SELECT * FROM onboarding_cases WHERE id=${caseId}::uuid FOR UPDATE`;
       const c:any=caseRows[0];
       if(!c) throw new Error('CASE_NOT_FOUND');
-      if(!isWorkspaceAdmin(user,'onboarding') && c.assigned_to!==user.id) throw new Error('NOT_ASSIGNED');
+      if(!canManageAllOnboardingCases(user) && c.assigned_to!==user.id) throw new Error('NOT_ASSIGNED');
 
       const attemptRows=await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${caseId}::uuid`;
       const attempt=Number(attemptRows[0]?.n||1);
