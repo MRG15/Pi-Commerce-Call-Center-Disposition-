@@ -59,7 +59,7 @@ export async function POST(req:Request){
       const additionalTopUp=l0Code==='OB_ADDITIONAL_TOPUP';
       const postLiveOutcome=l0Code==='OB_ANOTHER_AD_LIVE'||l0Code==='OB_CREATIVE_UPDATED';
       const customerSuccessFollowUp=customerSuccess&&c.current_status==='ads_live';
-      const customerSuccessPostLiveCodes=new Set(['OB_IN_PROCESS','OB_ADDITIONAL_TOPUP','OB_ANOTHER_AD_LIVE','OB_CREATIVE_UPDATED','OB_NOT_INTERESTED','OB_REFUND_REQUESTED']);
+      const customerSuccessPostLiveCodes=new Set(['OB_IN_PROCESS','OB_ADDITIONAL_TOPUP','OB_ANOTHER_AD_LIVE','OB_CREATIVE_UPDATED','OB_SUBS_RENEWED','OB_NOT_INTERESTED','OB_REFUND_REQUESTED']);
       if(customerSuccessFollowUp&&!customerSuccessPostLiveCodes.has(l0Code)) throw new Error('POST_LIVE_OUTCOME_NOT_ALLOWED');
       if(postLiveOutcome&&!customerSuccess) throw new Error('CS_ONLY');
       if(postLiveOutcome&&c.current_status!=='ads_live') throw new Error('POST_LIVE_ONLY');
