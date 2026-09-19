@@ -41,7 +41,7 @@ export async function GET(req: Request) {
       LEFT JOIN agents a ON a.id=e.agent_id
       WHERE e.l0_code='OB_SUBS_RENEWED'
         AND e.event_date BETWEEN ${from}::date AND ${to}::date
-        AND e.source_type='new_event'
+        AND e.source_type IN ('new_event','customer_success_followup')
     `;
   }catch{}
 
@@ -116,7 +116,7 @@ export async function GET(req: Request) {
       dispositionSplit:'Fresh/repeat splits use the actual taxonomy/status on each call. Remarks are never used as dispositions.',
       connectRate:'Conservative: known connected/not-connected outcomes only. Unknown legacy outcomes are excluded.',
       semanticBuckets:'Quick Answers classifies approved disposition/status labels across L0, L1 or L2; it never scans free-text remarks.',
-      subscriptionRenewal:'Only the explicit Onboarding outcome Subscription Renewed is added to Seller Payment Done. No other onboarding activity affects Seller analytics.',
+      subscriptionRenewal:'Only the explicit Subscription Renewed outcome from Onboarding or post-live Customer Success is added to Seller Payment Done. No other onboarding activity affects Seller analytics.',
       visitsRequested:'Only date-attributable call dispositions are counted; legacy customer-level flags are not assigned to a guessed call date.'
     }
   });
