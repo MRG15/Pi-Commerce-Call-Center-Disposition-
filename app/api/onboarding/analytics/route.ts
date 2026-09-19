@@ -51,9 +51,9 @@ export async function GET(req:Request){
 
   const events=await sql`
     SELECT
-      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND event_date BETWEEN ${from}::date AND ${to}::date)::int AS touches,
+      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import','customer_success_followup') AND event_date BETWEEN ${from}::date AND ${to}::date)::int AS touches,
       COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND event_date BETWEEN ${from}::date AND ${to}::date AND l0_label_snapshot IS NOT NULL AND l0_label_snapshot<>'Not Connected')::int AS connected,
-      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND event_date BETWEEN ${from}::date AND ${to}::date AND callback_at IS NOT NULL)::int AS callbacks_scheduled,
+      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import','customer_success_followup') AND event_date BETWEEN ${from}::date AND ${to}::date AND callback_at IS NOT NULL)::int AS callbacks_scheduled,
       COUNT(DISTINCT customer_id) FILTER (
         WHERE source_type IN ('new_event','historical_import')
           AND event_date BETWEEN ${from}::date AND ${to}::date
@@ -128,7 +128,7 @@ export async function GET(req:Request){
         AND (t.resolved_at IS NULL OR (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)
         AND (c.ads_live_at IS NULL OR (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)) AS tech_open,
       (SELECT COUNT(*)::int FROM technical_cases t WHERE t.assigned_to=a.id AND t.status='resolved' AND COALESCE(t.source_type,'')<>'customer_success_followup' AND t.resolved_at IS NOT NULL AND (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS tech_resolved,
-      (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','historical_import') AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS touches,
+      (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','historical_import','customer_success_followup') AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS touches,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.l0_code='OB_SUBS_RENEWED' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS subscriptions_renewed,
       (SELECT COALESCE(SUM(e.top_up_amount_inr),0)::numeric FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','customer_success_followup') AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS top_up_amount,
       (SELECT ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (c.ads_live_at-COALESCE(c.sale_date::timestamptz,c.created_at)))/86400.0)),1)
