@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { currentUserAccess } from '@/lib/workspace-access';
 import {
-  countSales,sellerIncentives,onboarderIncentives,mondayOf,
+  countSales,sellerIncentives,onboarderIncentives,mondayOf,BACKFILLED_TOP_UPS,
   SELLER_DAILY_PLANS,SELLER_WEEKLY_PLANS,ONBOARDER_PLANS,SALE_COUNTING_RULES,SELLER_ROSTER,ONBOARDER_ROSTER,
 } from '@/lib/incentives';
 
@@ -56,7 +56,7 @@ export async function GET(req:Request){
   const seller=sellerIncentives(saleDays,from!,to!);
   const onboarder=onboarderIncentives(
     adsLive.map((c:any)=>({date:c.date,person:c.person})),
-    topUps.map((t:any)=>({date:t.date,person:t.person,amount:Number(t.amount),customerId:String(t.customer_id)})),
+    [...topUps.map((t:any)=>({date:t.date,person:t.person,amount:Number(t.amount),customerId:String(t.customer_id)})),...BACKFILLED_TOP_UPS],
     from!,to!,
   );
 

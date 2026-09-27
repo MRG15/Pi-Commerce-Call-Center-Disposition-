@@ -104,6 +104,7 @@ export async function POST(req:Request){
     alreadyAdsLive:0,
     existingOpenNoChange:0,
     lostNoChange:0,
+    lostMarkedExternalLive:0,
     otherNoChange:0,
     missingFirstAdDate:0,
     actions:[] as Array<{customerId:string;action:string}>,
@@ -143,6 +144,9 @@ export async function POST(req:Request){
         }
       }else if(c.current_status==='ads_live' || c.ads_live_at){
         summary.alreadyAdsLive++;
+      }else if(c.current_status==='lost' && isLiveAsOfCutoff){
+        summary.lostMarkedExternalLive++;
+        summary.actions.push({customerId:row.customerId,action:'MARK_LOST_EXTERNAL_ADS_LIVE'});
       }else if(c.current_status==='lost'){
         summary.lostNoChange++;
       }else if(c.current_status==='open' && isLiveAsOfCutoff){
@@ -227,6 +231,35 @@ export async function POST(req:Request){
 
       if(c.current_status==='ads_live' || c.ads_live_at){
         summary.alreadyAdsLive++;
+        return;
+      }
+      if(c.current_status==='lost' && isLiveAsOfCutoff){
+        // The merchant went live on their own after the agent closed the case as lost.
+        // Keep the agent's last disposition and lost status; only record the external Ads Live
+        // so it counts in Ads Made Live Externally and the Ads Live Rate.
+        const lostAttemptRows=await tx`
+          SELECT COALESCE(MAX(attempt_number),0)+1 AS n
+          FROM onboarding_events
+          WHERE onboarding_case_id=${c.id}::uuid
+        `;
+        await tx`
+          INSERT INTO onboarding_events(
+            onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,source_row,
+            l0_code,l0_label_snapshot,remark
+          )
+          VALUES(
+            ${c.id}::uuid,${row.customerId},${Number(lostAttemptRows[0]?.n||1)},'system','Sub Raw',${row.sourceRow},
+            'SYSTEM_EXTERNAL_ADS_LIVE','Externally Ads Live',
+            'Ads execution detected from Sub Raw T-1 sync after the case was closed as lost; lost disposition retained.'
+          )
+        `;
+        await tx`
+          UPDATE onboarding_cases
+          SET ads_live_at=(${row.firstAdDate}::date::timestamp AT TIME ZONE 'Asia/Kolkata'),updated_at=now()
+          WHERE id=${c.id}::uuid
+        `;
+        summary.lostMarkedExternalLive++;
+        summary.actions.push({customerId:row.customerId,action:'MARK_LOST_EXTERNAL_ADS_LIVE'});
         return;
       }
       if(c.current_status==='lost'){
