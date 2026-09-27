@@ -20,11 +20,11 @@ export const SELLER_WEEKLY_PLANS:WeeklyPlan[] = [
   { from:'2026-09-07', name:'Weekly bonus', slabs:[{at:12,pay:1200},{at:18,pay:2000}] },
 ];
 
-// Onboarder plan: Ads Live cases (daily ladder) + per-instance top-ups.
+// Onboarder plan from 1 Sep 2026: Ads Live cases (daily ladder) + per-instance top-ups.
 // Each top-up is priced on its own: below ₹1,000 earns nothing, up to ₹5,000 earns 5%,
 // above ₹5,000 earns 10% of the whole amount.
 export const ONBOARDER_PLANS:OnboarderPlan[] = [
-  { from:'2026-08-24', name:'Ads Live + Top-up', unlock:5, unlockPay:200, perCase:50, topUpMin:1000, topUpCeiling:5000, rateUpToCeiling:0.05, rateAboveCeiling:0.10 },
+  { from:'2026-09-01', name:'Ads Live + Top-up', unlock:5, unlockPay:200, perCase:50, topUpMin:1000, topUpCeiling:5000, rateUpToCeiling:0.05, rateAboveCeiling:0.10 },
 ];
 
 // How seller Payment done calls turn into sales. Up to 20 Sep 2026 the Excel counted a customer
@@ -49,11 +49,11 @@ export const SELLER_ROSTER:Membership[] = [
 ];
 
 export const ONBOARDER_ROSTER:Membership[] = [
-  { name:'Ashish', from:'2026-08-24' },
-  { name:'Dhruv', from:'2026-08-24' },
-  { name:'Priyanshi', from:'2026-08-24' },
-  { name:'Kunal', from:'2026-08-24' },
-  { name:'Abhishek', from:'2026-08-24' },
+  { name:'Ashish', from:'2026-09-01' },
+  { name:'Dhruv', from:'2026-09-01' },
+  { name:'Priyanshi', from:'2026-09-01' },
+  { name:'Kunal', from:'2026-09-01' },
+  { name:'Abhishek', from:'2026-09-01' },
 ];
 
 export function planOn<T extends {from:string}>(plans:T[],date:string):T|null{

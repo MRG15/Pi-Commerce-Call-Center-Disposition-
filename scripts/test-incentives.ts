@@ -12,6 +12,9 @@ const ob=planOn(ONBOARDER_PLANS,'2026-09-01')!;
 assert.equal(launch.name,'Launch'); assert.equal(planOn(SELLER_DAILY_PLANS,'2026-08-23')!.name,'Launch');
 assert.equal(uplift.name,'Uplift'); assert.equal(planOn(SELLER_DAILY_PLANS,'2026-08-05'),null);
 assert.equal(planOn(SELLER_WEEKLY_PLANS,'2026-08-31'),null);
+assert.equal(planOn(ONBOARDER_PLANS,'2026-08-31'),null); assert.equal(planOn(SELLER_WEEKLY_PLANS,'2026-09-07')!.from,'2026-09-07');
+// No onboarder incentive before 1 Sep, even at 5+ cases.
+assert.equal(onboarderIncentives(Array.from({length:6},()=>({date:'2026-08-31',person:'Ashish'})),[],'2026-08-31','2026-08-31').length,0);
 
 // Seller daily validation cases.
 assert.equal(ladderPay(launch,1),0); assert.equal(ladderPay(launch,2),150);
