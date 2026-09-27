@@ -12,7 +12,8 @@
     "migrate:data": "tsx scripts/migrate-data.ts",
     "migrate:validate": "tsx scripts/validate-migration.ts",
     "migrate:neon": "tsx scripts/migrate-neon.ts",
-    "agent:create": "tsx scripts/create-agent.ts"
+    "agent:create": "tsx scripts/create-agent.ts",
+    "test:incentives": "tsx scripts/test-incentives.ts"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
