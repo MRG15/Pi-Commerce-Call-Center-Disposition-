@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   ladderPay,weeklyPay,onboarderCasePay,topUpPay,planOn,countSales,sellerIncentives,onboarderIncentives,mondayOf,
-  SELLER_DAILY_PLANS,SELLER_WEEKLY_PLANS,ONBOARDER_PLANS,
+  SELLER_DAILY_PLANS,SELLER_WEEKLY_PLANS,ONBOARDER_PLANS,BACKFILLED_TOP_UPS,
 } from '../lib/incentives';
 
 const launch=planOn(SELLER_DAILY_PLANS,'2026-08-10')!;
@@ -61,5 +61,11 @@ assert.equal(sellerIncentives(week,'2026-09-20','2026-09-20').weekly[0].pay,1200
 assert.equal(sellerIncentives(week,'2026-09-14','2026-09-19').weekly.length,0);
 // Ashish left the seller plan after August.
 assert.equal(sellerIncentives([{date:'2026-09-01',person:'Ashish',sales:3}],'2026-09-01','2026-09-01').daily.length,0);
+
+// Excel-only top-ups before 10 Sep: Ashish ₹725, Dhruv's ₹600 is below the ₹1,000 minimum.
+const backfill=onboarderIncentives([],BACKFILLED_TOP_UPS,'2026-09-01','2026-09-30');
+assert.equal(backfill.filter(r=>r.person==='Ashish').reduce((s,r)=>s+r.topUpPay,0),725);
+assert.equal(backfill.filter(r=>r.person==='Dhruv').reduce((s,r)=>s+r.topUpPay,0),0);
+assert.equal(onboarderIncentives([],BACKFILLED_TOP_UPS,'2026-09-10','2026-09-30').length,0);
 
 console.log('All incentive checks passed.');

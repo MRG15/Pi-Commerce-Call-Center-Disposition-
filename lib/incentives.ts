@@ -155,7 +155,21 @@ export function sellerIncentives(saleDays:SaleDay[],from:string,to:string){
 }
 
 export type AdsLiveCase = { date:string; person:string };
-export type TopUp = { date:string; person:string; amount:number; customerId:string };
+export type TopUp = { date:string; person:string; amount:number; customerId:string; note?:string };
+
+// Top-ups made before onboarding updates were logged in the portal (10 Sep 2026). They were
+// recorded only in the incentive Excel as each person's top-ups per day, without merchant IDs,
+// so they live here instead of as onboarding events. Priced with the normal top-up rule.
+export const BACKFILLED_TOP_UPS:TopUp[] = [
+  { date:'2026-09-01', person:'Ashish', amount:1500, customerId:'', note:'Excel backfill' },
+  { date:'2026-09-02', person:'Ashish', amount:1000, customerId:'', note:'Excel backfill' },
+  { date:'2026-09-03', person:'Ashish', amount:1000, customerId:'', note:'Excel backfill' },
+  { date:'2026-09-05', person:'Ashish', amount:1000, customerId:'', note:'Excel backfill' },
+  { date:'2026-09-07', person:'Ashish', amount:1000, customerId:'', note:'Excel backfill' },
+  { date:'2026-09-08', person:'Ashish', amount:4000, customerId:'', note:'Excel backfill' },
+  { date:'2026-09-08', person:'Ashish', amount:5000, customerId:'', note:'Excel backfill' },
+  { date:'2026-09-08', person:'Dhruv', amount:600, customerId:'', note:'Excel backfill' },
+];
 export type OnboarderLedgerRow = { date:string; person:string; cases:number; casePay:number; topUps:number; topUpValue:number; topUpPay:number; plan:string; pay:number };
 
 export function onboarderIncentives(cases:AdsLiveCase[],topUps:TopUp[],from:string,to:string){
