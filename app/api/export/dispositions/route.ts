@@ -38,7 +38,9 @@ export async function GET(req: Request) {
       c.source_sheet,
       c.source_row,
       c.source_call_num,
-      c.event_time
+      c.event_time,
+      c.plan_code,
+      c.plan_amount_inr
     FROM calls c
     LEFT JOIN agents a ON a.id = c.agent_id
     WHERE c.call_date BETWEEN ${from}::date AND ${to}::date
@@ -50,7 +52,7 @@ export async function GET(req: Request) {
     'customer_id','call_date','attempt_number','call_seq','agent_name','source_type',
     'status_raw','what_happened','remark','l0','l1','l2','facebook_page_status',
     'whatsapp_handoff','call_duration_seconds','is_legacy','source_sheet','source_row',
-    'source_call_num','event_time'
+    'source_call_num','event_time','plan','plan_amount_inr'
   ];
   const body = [headers.join(','), ...rows.map((r:any) => [
     r.customer_id,
@@ -58,7 +60,8 @@ export async function GET(req: Request) {
     r.attempt_number,r.call_seq,r.agent_name,r.source_type,r.status_raw,r.what_happened,r.remark,
     r.l0_label_snapshot,r.l1_label_snapshot,r.l2_label_snapshot,r.facebook_page_status,
     r.whatsapp_handoff,r.call_duration_seconds,r.is_legacy,r.source_sheet,r.source_row,
-    r.source_call_num,r.event_time instanceof Date ? r.event_time.toISOString() : r.event_time
+    r.source_call_num,r.event_time instanceof Date ? r.event_time.toISOString() : r.event_time,
+    r.plan_code,r.plan_amount_inr
   ].map(csvCell).join(','))].join('\n');
 
   return new NextResponse(body, {

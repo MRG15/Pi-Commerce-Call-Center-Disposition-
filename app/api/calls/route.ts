@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { PLANS, isPlanCode, plansRequiredOn } from '@/lib/plans';
 
 function isCallbackLabel(v:string|null|undefined){
   const s=String(v||'').toLowerCase();
@@ -19,6 +20,8 @@ export async function POST(req: Request) {
   const fb=body.facebookPageStatus ? String(body.facebookPageStatus) : null;
   const callbackDate=body.callbackDate ? String(body.callbackDate) : null;
   const callbackTime=body.callbackTime ? String(body.callbackTime) : null;
+  const planCodeRaw=body.planCode ? String(body.planCode) : null;
+  if (planCodeRaw && !isPlanCode(planCodeRaw)) return NextResponse.json({error:'Invalid plan'},{status:400});
   if (!customerId || !l0Code) return NextResponse.json({error:'Customer ID and L0 are required'},{status:400});
   const sql=db();
   try {
@@ -60,6 +63,11 @@ export async function POST(req: Request) {
       // Business date is India time. Using UTC here would record the previous date between 00:00-05:30 IST.
       const [dateRow]=await tx`SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date::text AS today`;
       const today=String(dateRow.today);
+      // Every sale (Payment done / Enrolled via WhatsApp) records the plan sold from 1 Oct 2026.
+      const isSale=String(l1?.label||'')==='Payment done' || String(l2?.label||'')==='Enrolled via WhatsApp';
+      const planCode=isSale && planCodeRaw && isPlanCode(planCodeRaw) ? planCodeRaw : null;
+      if (isSale && plansRequiredOn(today) && !planCode) throw new Error('Select the plan sold (Silver, Gold or Platinum)');
+      const planAmount=planCode ? PLANS[planCode].price : null;
       const seqRows=await tx`SELECT COALESCE(max(call_seq),0)::int AS n FROM calls WHERE customer_id=${customerId} AND call_date=${today}::date`;
       const seq=Number(seqRows[0].n)+1;
       const sourceKey=`NEW|${customerId}|${Date.now()}|${crypto.randomUUID()}`;
@@ -67,11 +75,11 @@ export async function POST(req: Request) {
         INSERT INTO calls (
           customer_id,attempt_number,call_date,call_seq,event_time,agent_id,agent_name_raw,source_type,source_key,
           l0_id,l1_id,l2_id,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,facebook_page_status,
-          whatsapp_handoff,callback_at,is_legacy,is_conversion_authoritative
+          whatsapp_handoff,callback_at,is_legacy,is_conversion_authoritative,plan_code,plan_amount_inr
         ) VALUES (
           ${customerId},${attempt},${today}::date,${seq},now(),${String(agent.id)}::uuid,${String(agent.name)},'new_call',${sourceKey},
           ${String(l0.id)}::uuid,${l1?String(l1.id):null}::uuid,${l2?String(l2.id):null}::uuid,${String(l0.label)},${l1?String(l1.label):null},${l2?String(l2.label):null},${remark},${fb},
-          ${String(l1?.label||'')==='Taken to WhatsApp for closure'},${callbackAt},FALSE,TRUE
+          ${String(l1?.label||'')==='Taken to WhatsApp for closure'},${callbackAt},FALSE,TRUE,${planCode},${planAmount}
         ) RETURNING *
       `;
       return rows[0];

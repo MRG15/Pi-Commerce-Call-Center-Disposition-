@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { currentUserAccess,canAccess,canManageAllOnboardingCases } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
+import { PLANS, isPlanCode, plansRequiredOn, todayIst } from '@/lib/plans';
 
 export async function POST(req:Request){
   const user:any=await currentUserAccess();
@@ -18,6 +19,12 @@ export async function POST(req:Request){
   const rawTopUp=body.topUpAmount;
   const topUpAmount=rawTopUp===null||rawTopUp===undefined||String(rawTopUp).trim()===''?null:Number(rawTopUp);
   if(topUpAmount!==null&&(!Number.isFinite(topUpAmount)||topUpAmount<0)) return NextResponse.json({error:'Top-up amount must be zero or more.'},{status:400});
+  const planCodeRaw=body.planCode?String(body.planCode):null;
+  if(planCodeRaw&&!isPlanCode(planCodeRaw)) return NextResponse.json({error:'Invalid plan.'},{status:400});
+  // Subscription Renewed records the plan sold from 1 Oct 2026.
+  const planCode=l0Code==='OB_SUBS_RENEWED'&&planCodeRaw&&isPlanCode(planCodeRaw)?planCodeRaw:null;
+  if(l0Code==='OB_SUBS_RENEWED'&&plansRequiredOn(todayIst())&&!planCode) return NextResponse.json({error:'Select the plan renewed (Silver, Gold or Platinum).'},{status:400});
+  const planAmount=planCode?PLANS[planCode].price:null;
   if(!caseId) return NextResponse.json({error:'Case is required.'},{status:400});
   if(!l0Code&&!resolveTechId) return NextResponse.json({error:'Outcome is required.'},{status:400});
   const sql=db();
@@ -86,8 +93,8 @@ export async function POST(req:Request){
       if((l1Code==='OB_OTHER_PROCESS'||l1Code==='OB_NI_OTHER'||l1Code==='OB_REFUND_OTHER'||l2Code==='OB_TECH_OTHER') && !remark) throw new Error('REMARK_REQUIRED');
 
       await tx`
-        INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l2_code,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr)
-        VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},${customerSuccessFollowUp?'customer_success_followup':'new_event'},${l0Code},${l1Code},${l2Code},${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${topUpAmount})
+        INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l2_code,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr,plan_code,plan_amount_inr)
+        VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},${customerSuccessFollowUp?'customer_success_followup':'new_event'},${l0Code},${l1Code},${l2Code},${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${topUpAmount},${planCode},${planAmount})
       `;
 
       if(customerSuccessFollowUp){
