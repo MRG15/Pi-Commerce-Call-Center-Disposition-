@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
-  ladderPay,weeklyPay,onboarderCasePay,topUpPay,planOn,countSales,sellerIncentives,onboarderIncentives,mondayOf,
+  ladderPay,weeklyPay,onboarderCasePay,topUpPay,planOn,countSales,countedSales,sellerIncentives,sellerRevenueIncentives,onboarderIncentives,mondayOf,revenueSlabPay,
+  SELLER_REVENUE_PLANS,
   SELLER_DAILY_PLANS,SELLER_WEEKLY_PLANS,ONBOARDER_PLANS,BACKFILLED_TOP_UPS,
 } from '../lib/incentives';
 
@@ -67,5 +68,71 @@ const backfill=onboarderIncentives([],BACKFILLED_TOP_UPS,'2026-09-01','2026-09-3
 assert.equal(backfill.filter(r=>r.person==='Ashish').reduce((s,r)=>s+r.topUpPay,0),725);
 assert.equal(backfill.filter(r=>r.person==='Dhruv').reduce((s,r)=>s+r.topUpPay,0),0);
 assert.equal(onboarderIncentives([],BACKFILLED_TOP_UPS,'2026-09-10','2026-09-30').length,0);
+
+// ---- From 1 Oct 2026 ----
+// Old seller plans stop on 30 Sep; the onboarder plan gains renewals.
+assert.equal(planOn(SELLER_DAILY_PLANS,'2026-09-30')!.name,'Uplift'); assert.equal(planOn(SELLER_DAILY_PLANS,'2026-10-01'),null);
+assert.equal(planOn(SELLER_REVENUE_PLANS,'2026-09-30'),null); assert.equal(planOn(SELLER_REVENUE_PLANS,'2026-10-01')!.name,'Weekly revenue');
+assert.equal(planOn(ONBOARDER_PLANS,'2026-09-30')!.paysRenewals,undefined); assert.equal(planOn(ONBOARDER_PLANS,'2026-10-01')!.paysRenewals,true);
+
+// Old weekly bonus for the week of 28 Sep counts only 28–30 Sep and is credited on Sunday 4 Oct.
+const straddle=[{date:'2026-09-28',person:'Sheena',sales:5},{date:'2026-09-29',person:'Sheena',sales:4},{date:'2026-09-30',person:'Sheena',sales:3},{date:'2026-10-01',person:'Sheena',sales:6}];
+const straddleOut=sellerIncentives(straddle,'2026-09-28','2026-10-04');
+assert.equal(straddleOut.weekly[0].sales,12); assert.equal(straddleOut.weekly[0].pay,1200);
+assert.equal(straddleOut.daily.some(r=>r.date==='2026-10-01'),false);
+assert.equal(sellerIncentives([{date:'2026-09-28',person:'Sheena',sales:11},{date:'2026-10-01',person:'Sheena',sales:3}],'2026-09-28','2026-10-04').weekly[0].pay,0);
+
+// Cumulative revenue slabs.
+const rp=planOn(SELLER_REVENUE_PLANS,'2026-10-01')!;
+assert.equal(revenueSlabPay(rp.slabs.BDE,29999),0); assert.equal(revenueSlabPay(rp.slabs.BDE,30000),2000);
+assert.equal(revenueSlabPay(rp.slabs.BDE,50000),5000); assert.equal(revenueSlabPay(rp.slabs.BDE,100000),10000);
+assert.equal(revenueSlabPay(rp.slabs.SBDE,39999),0); assert.equal(revenueSlabPay(rp.slabs.SBDE,40000),3000);
+assert.equal(revenueSlabPay(rp.slabs.SBDE,80000),8000); assert.equal(revenueSlabPay(rp.slabs.SBDE,140000),14000);
+
+// Revenue per counted sale: ₹799 up to 30 Sep, the plan price from 1 Oct.
+const cs=countedSales([
+  {customerId:'A',date:'2026-09-30',seq:1,attempt:1,person:'Umesh',planAmount:null},
+  {customerId:'B',date:'2026-10-01',seq:1,attempt:1,person:'Umesh',planAmount:4999},
+  {customerId:'B',date:'2026-10-02',seq:1,attempt:2,person:'Umesh',planAmount:9999},
+]);
+assert.deepEqual(cs.map(c=>c.revenue),[799,4999]);
+
+// Weekly revenue with roles: TL own SBDE slabs + half of each BDE payout. First week is 1–4 Oct.
+const roles=[
+  {person:'Sheena',role:'TL' as const,teamLead:null,effectiveFrom:'2026-10-01'},
+  {person:'Jay',role:'SBDE' as const,teamLead:null,effectiveFrom:'2026-10-01'},
+  {person:'Neha',role:'BDE' as const,teamLead:'Sheena',effectiveFrom:'2026-10-01'},
+  {person:'Neha',role:'SBDE' as const,teamLead:null,effectiveFrom:'2026-10-07'},
+];
+const sale=(date:string,person:string,revenue:number)=>({customerId:date+person+revenue,date,person,revenue});
+const wk=sellerRevenueIncentives([
+  sale('2026-09-29','Sheena',50000),
+  sale('2026-10-01','Sheena',45000),sale('2026-10-02','Neha',30000),sale('2026-10-04','Neha',30000),
+  sale('2026-10-03','Jay',85000),
+  sale('2026-10-08','Neha',30000),
+],roles,'2026-10-01','2026-10-11');
+const w=(week:string,p:string)=>wk.find(r=>r.weekStart===week&&r.person===p)!;
+assert.equal(w('2026-09-28','Sheena').revenue,45000); assert.equal(w('2026-09-28','Sheena').slabPay,3000);
+assert.equal(w('2026-09-28','Neha').slabPay,5000); assert.equal(w('2026-09-28','Sheena').teamShare,2500); assert.equal(w('2026-09-28','Sheena').pay,5500);
+assert.equal(w('2026-09-28','Jay').pay,8000);
+// Neha becomes SBDE on Wed 7 Oct: her week of 5 Oct is still priced as a BDE under Sheena.
+assert.equal(w('2026-10-05','Neha').role,'BDE'); assert.equal(w('2026-10-05','Neha').slabPay,2000);
+assert.equal(w('2026-10-05','Sheena').teamShare,1000);
+// A week whose Sunday is outside the range is not paid.
+assert.equal(sellerRevenueIncentives([sale('2026-10-01','Jay',90000)],roles,'2026-10-01','2026-10-03').length,0);
+
+// Renewals from 1 Oct: priced one by one like top-ups; before 1 Oct they earn onboarders nothing.
+const ren=onboarderIncentives([],[{date:'2026-10-02',person:'Kunal',amount:5000,customerId:'X'}],'2026-09-30','2026-10-02',[
+  {date:'2026-09-30',person:'Kunal',amount:1999,customerId:'Y'},
+  {date:'2026-10-02',person:'Kunal',amount:1999,customerId:'X'},
+  {date:'2026-10-02',person:'Dhruv',amount:9999,customerId:'Z'},
+]);
+const rk=ren.find(r=>r.person==='Kunal'&&r.date==='2026-10-02')!;
+assert.equal(rk.renewalPay,99.95); assert.equal(rk.topUpPay,250); assert.equal(rk.pay,349.95);
+assert.equal(ren.find(r=>r.person==='Dhruv')!.renewalPay,999.9);
+assert.equal(ren.some(r=>r.date==='2026-09-30'),false);
+// From 1 Oct renewals are no longer seller sales.
+const sd2=countSales([],[{date:'2026-09-29',person:'Kunal'},{date:'2026-10-02',person:'Kunal'}]);
+assert.equal(sd2.length,1); assert.equal(sd2[0].date,'2026-09-29');
 
 console.log('All incentive checks passed.');
