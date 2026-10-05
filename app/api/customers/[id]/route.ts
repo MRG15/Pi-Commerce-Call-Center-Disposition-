@@ -38,8 +38,19 @@ export async function GET(_: Request, ctx: {params: Promise<{id:string}>}) {
     merchant=merchantRows[0]||null;
   }
 
+  const [externalTable]=await sql`SELECT to_regclass('public.external_leads')::text AS t`;
+  let externalLead:any=null;
+  if (externalTable?.t) {
+    const rows=await sql`
+      SELECT e.customer_id,e.name,e.phone,e.created_at,a.name AS added_by_name
+      FROM external_leads e LEFT JOIN agents a ON a.id=e.added_by
+      WHERE e.customer_id=${customerId} LIMIT 1
+    `;
+    externalLead=rows[0]||null;
+  }
+
   if (!customers[0] && calls.length===0 && flagRows.length===0 && !merchant) {
-    return NextResponse.json({found:false, customer:{customer_id:customerId}, merchant:null, summary:{totalAttempts:0,firstCallDate:null,lastCallDate:null,lastAgent:null,latestOutcome:'New customer'}, calls:[], activeFlags:{}, legacyFlagSources:[]});
+    return NextResponse.json({found:false, customer:{customer_id:customerId}, merchant:null, externalLead:null, summary:{totalAttempts:0,firstCallDate:null,lastCallDate:null,lastAgent:null,latestOutcome:'New customer'}, calls:[], activeFlags:{}, legacyFlagSources:[]});
   }
 
   const c=customers[0] || {customer_id:customerId};
@@ -61,5 +72,5 @@ export async function GET(_: Request, ctx: {params: Promise<{id:string}>}) {
     lastAgent:calls.at(-1)?.agent_name ?? calls.at(-1)?.agent_name_raw ?? null,
     latestOutcome:calls.at(-1)?.l0_label_snapshot ?? calls.at(-1)?.status_raw ?? calls.at(-1)?.remark ?? 'No outcome recorded',
   };
-  return NextResponse.json({found:true,customer:c,merchant,summary,calls,activeFlags,legacyFlagSources:flagRows});
+  return NextResponse.json({found:true,customer:c,merchant,externalLead,summary,calls,activeFlags,legacyFlagSources:flagRows});
 }

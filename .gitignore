@@ -8,3 +8,4 @@ migration-validation.json
 *.log
 .DS_Store
 source/*.xlsx
+*.tsbuildinfo
