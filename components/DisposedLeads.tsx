@@ -6,6 +6,16 @@ type Node={id:string;code:string;label:string;level:number;parent_id:string|null
 function ymd(d:Date){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function shift(days:number){const d=new Date();d.setDate(d.getDate()+days);return d;}
 function fmtTime(v:any){if(!v)return '—';return new Date(v).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true});}
+// Summary boxes. Warm = Callback — pre-pitch (L0) + Callback — mid-pitch (L1 under Interested);
+// mid-pitch callbacks count only in Warm, so the three boxes never overlap.
+type Bucket=''|'interested'|'not_interested'|'warm';
+function bucketOf(r:any):Bucket{
+  if(r.l0_label_snapshot==='Callback — pre-pitch'||r.l1_label_snapshot==='Callback — mid-pitch')return 'warm';
+  if(r.l0_label_snapshot==='Interested')return 'interested';
+  if(r.l0_label_snapshot==='Not Interested')return 'not_interested';
+  return '';
+}
+const BUCKETS:[Exclude<Bucket,''>,string,string][]=[['interested','Interested','All Interested outcomes, incl. Payment done'],['not_interested','Not Interested','All Not Interested outcomes'],['warm','Warm','Callback — pre-pitch + Callback — mid-pitch']];
 function disposition(r:any){return [r.l0_label_snapshot,r.l1_label_snapshot,r.l2_label_snapshot].filter(Boolean).join(' → ')||'—';}
 
 export default function DisposedLeads({nodes,me,onOpen}:{nodes:Node[];me:any;onOpen:(customerId:string)=>void}){
@@ -13,7 +23,7 @@ export default function DisposedLeads({nodes,me,onOpen}:{nodes:Node[];me:any;onO
   const [from,setFrom]=useState(ymd(shift(-6))),[to,setTo]=useState(today);
   const [agentId,setAgentId]=useState(String(me.id)),[agents,setAgents]=useState<any[]>([]);
   const [l0,setL0]=useState(''),[l1,setL1]=useState(''),[l2,setL2]=useState('');
-  const [mode,setMode]=useState<'latest'|'all'>('latest'),[search,setSearch]=useState('');
+  const [mode,setMode]=useState<'latest'|'all'>('latest'),[search,setSearch]=useState(''),[bucket,setBucket]=useState<Bucket>('');
   const [rows,setRows]=useState<any[]>([]),[truncated,setTruncated]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState('');
   const [adding,setAdding]=useState(false),[newId,setNewId]=useState(''),[newName,setNewName]=useState(''),[newPhone,setNewPhone]=useState('');
   const [addMsg,setAddMsg]=useState(''),[existingId,setExistingId]=useState(''),[saving,setSaving]=useState(false);
@@ -22,10 +32,9 @@ export default function DisposedLeads({nodes,me,onOpen}:{nodes:Node[];me:any;onO
   const l1s=nodes.filter(n=>n.level===1&&n.parent_id===l0);
   const l2s=nodes.filter(n=>n.level===2&&n.parent_id===l1);
 
-  async function load(f=from,t=to,opts:{agentId?:string;l0?:string;l1?:string;l2?:string;mode?:string}={}){
+  // Disposition filters run in the browser so the summary boxes always count the whole range.
+  async function load(f=from,t=to,opts:{agentId?:string;mode?:string}={}){
     const qs=new URLSearchParams({from:f,to:t,agentId:opts.agentId??agentId,mode:opts.mode??mode});
-    const d0=opts.l0??l0,d1=opts.l1??l1,d2=opts.l2??l2;
-    if(d0)qs.set('l0',d0); if(d0&&d1)qs.set('l1',d1); if(d0&&d1&&d2)qs.set('l2',d2);
     setFrom(f);setTo(t);setLoading(true);setError('');
     const r=await fetch('/api/leads?'+qs.toString(),{cache:'no-store'});
     const j=await r.json();
@@ -43,11 +52,13 @@ export default function DisposedLeads({nodes,me,onOpen}:{nodes:Node[];me:any;onO
     return load(ymd(new Date(now.getFullYear(),now.getMonth(),1)),today);
   }
 
+  const counts=useMemo(()=>{const c:any={interested:0,not_interested:0,warm:0};for(const r of rows){const b=bucketOf(r);if(b)c[b]++;}return c;},[rows]);
   const shown=useMemo(()=>{
     const q=search.trim().toLowerCase(),qd=q.replace(/\D/g,'');
-    if(!q)return rows;
-    return rows.filter(r=>String(r.customer_id).includes(q)||String(r.name||'').toLowerCase().includes(q)||(qd.length>=4&&String(r.phone||'').replace(/\D/g,'').includes(qd)));
-  },[rows,search]);
+    return rows.filter(r=>(!bucket||bucketOf(r)===bucket)
+      &&(!l0||r.l0_id===l0)&&(!l1||r.l1_id===l1)&&(!l2||r.l2_id===l2)
+      &&(!q||String(r.customer_id).includes(q)||String(r.name||'').toLowerCase().includes(q)||(qd.length>=4&&String(r.phone||'').replace(/\D/g,'').includes(qd))));
+  },[rows,search,bucket,l0,l1,l2]);
   const multiAgent=agents.length>1;
 
   async function addLead(){
@@ -84,14 +95,15 @@ export default function DisposedLeads({nodes,me,onOpen}:{nodes:Node[];me:any;onO
         </select></label>}
         <button className="primary" onClick={()=>load(from,to)} disabled={loading}>{loading?'Loading…':'Apply'}</button>
       </div>
+      <div className="kpis bucket-tiles">{BUCKETS.map(([key,label,hint])=><button key={key} type="button" className={bucket===key?'active':''} title={hint} onClick={()=>{setBucket(bucket===key?'':key);setL0('');setL1('');setL2('');}}><b>{counts[key]}</b><span>{label}</span></button>)}</div>
       <div className="form-grid padtop">
-        <label>Disposition (L0)<select value={l0} onChange={e=>{setL0(e.target.value);setL1('');setL2('');load(from,to,{l0:e.target.value,l1:'',l2:''});}}>
+        <label>Disposition (L0)<select value={l0} onChange={e=>{setL0(e.target.value);setL1('');setL2('');setBucket('');}}>
           <option value="">All dispositions</option>{l0s.map(n=><option key={n.id} value={n.id}>{n.label}</option>)}
         </select></label>
-        {l0&&l1s.length>0&&<label>L1 (optional)<select value={l1} onChange={e=>{setL1(e.target.value);setL2('');load(from,to,{l1:e.target.value,l2:''});}}>
+        {l0&&l1s.length>0&&<label>L1 (optional)<select value={l1} onChange={e=>{setL1(e.target.value);setL2('');}}>
           <option value="">Any</option>{l1s.map(n=><option key={n.id} value={n.id}>{n.label}</option>)}
         </select></label>}
-        {l1&&l2s.length>0&&<label>L2 (optional)<select value={l2} onChange={e=>{setL2(e.target.value);load(from,to,{l2:e.target.value});}}>
+        {l1&&l2s.length>0&&<label>L2 (optional)<select value={l2} onChange={e=>setL2(e.target.value)}>
           <option value="">Any</option>{l2s.map(n=><option key={n.id} value={n.id}>{n.label}</option>)}
         </select></label>}
         <label>Show<select value={mode} onChange={e=>{const m=e.target.value as 'latest'|'all';setMode(m);load(from,to,{mode:m});}}>
@@ -100,7 +112,7 @@ export default function DisposedLeads({nodes,me,onOpen}:{nodes:Node[];me:any;onO
         <label className="wide">Search<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name, phone or customer ID"/></label>
       </div>
       {error&&<div className="error padtop">{error}</div>}
-      <div className="note">{shown.length} {mode==='latest'?'lead':'call'}{shown.length===1?'':'s'}{mode==='latest'?' · each lead shows its latest disposition in this date range, so the filter shows which bucket it is in now':''}{truncated?' · showing the latest 2,000 only; narrow the dates':''}</div>
+      <div className="note">{bucket?`Showing ${BUCKETS.find(b=>b[0]===bucket)![1]} · click the box again to clear · `:''}{shown.length} {mode==='latest'?'lead':'call'}{shown.length===1?'':'s'}{mode==='latest'?' · each lead shows its latest disposition in this date range, so the filter shows which bucket it is in now':''}{truncated?' · showing the latest 2,000 only; narrow the dates':''}</div>
     </section>
     <section className="card">
       {shown.length===0?<div className="empty">{loading?'Loading…':'No disposed leads for these filters.'}</div>:
