@@ -37,7 +37,9 @@ function installDailySubRawSyncTrigger() {
   ScriptApp.newTrigger('runSubRawOnboardingSync')
     .timeBased()
     .everyDays(1)
-    .atHour(11)
+    .atHour(7)
+    .nearMinute(15)
+    .inTimezone(TIMEZONE)
     .create();
 }
 
