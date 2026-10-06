@@ -5,7 +5,7 @@ import { currentUserAccess } from '@/lib/workspace-access';
 export async function GET(req:Request){
   const user:any=await currentUserAccess();
   if(!user) return NextResponse.json({error:'Unauthenticated'},{status:401});
-  const allowed=Boolean(user.isSuperAdmin || user.access?.onboarding==='admin' || user.access?.onboarding==='customer_success');
+  const allowed=Boolean(user.isSuperAdmin || user.access?.onboarding==='admin' || user.access?.onboarding==='customer_success' || user.access?.csm);
   if(!allowed) return NextResponse.json({error:'Customer Success analytics access required'},{status:403});
   const u=new URL(req.url); const from=u.searchParams.get('from'); const to=u.searchParams.get('to');
   if(!from||!to) return NextResponse.json({error:'from and to are required'},{status:400});

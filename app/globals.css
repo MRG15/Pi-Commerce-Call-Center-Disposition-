@@ -27,3 +27,20 @@
 .bucket-tiles b{display:block;font-size:28px;color:var(--navy)}
 .bucket-tiles span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;margin-top:4px}
 @media(max-width:760px){.bucket-tiles{grid-template-columns:repeat(3,1fr)}}
+.csm-tabs{grid-template-columns:repeat(5,1fr)}
+.csm-filter{max-width:200px}
+.csm-sync-note{margin:0 0 10px}
+.case-list span.csm-pitch{color:var(--navy);font-weight:600}
+.case-tags em.tag-warn{background:#fff1e6;color:#9a3412}
+.csm-note-add{display:flex;flex-direction:column;margin-top:10px}
+.csm-note-add textarea{min-height:60px}
+.csm-note-add .primary{align-self:flex-start;margin-top:8px}
+.csm-ad-desc{margin-top:3px;white-space:normal}
+.csm-src{font-size:10px;font-weight:800;text-transform:uppercase;background:#f1f5f9;color:#475569;border-radius:999px;padding:2px 6px;margin-left:4px}
+.event.csm-onb-event{border-left-color:#94a3b8;background:#fafbfc}
+.csm-bulk{min-height:180px!important;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.csm-weight{max-width:90px;padding:6px 8px;text-align:right}
+@media(max-width:980px){.csm-tabs{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:760px){.csm-tabs{grid-template-columns:1fr 1fr}}
+@media(min-width:981px){.access-row{grid-template-columns:minmax(180px,1fr) repeat(3,150px) 120px auto}}
+@media(max-width:760px){.seller-shell{grid-template-columns:minmax(0,1fr)}.side-nav{overflow-x:auto}.side-nav button{white-space:nowrap;flex:0 0 auto}.csm-filter{max-width:none}}
