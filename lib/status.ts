@@ -17,6 +17,7 @@ export const NON_CONNECTED = new Set([
   'call not picked',
   'voice mail',
   'voicemail',
+  'not connected',
 ]);
 
 export function connectionBucket(rawOrL0: string | null | undefined) {

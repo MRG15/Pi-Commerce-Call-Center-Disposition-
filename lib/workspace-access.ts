@@ -1,7 +1,7 @@
 import { currentAgent } from './auth';
 import { db } from './db';
 
-export type Workspace = 'seller'|'onboarding';
+export type Workspace = 'seller'|'onboarding'|'csm';
 export type WorkspaceRole = 'agent'|'customer_success'|'admin'|null;
 
 export async function currentUserAccess(){
@@ -18,6 +18,7 @@ export async function currentUserAccess(){
   let isSuperAdmin=false;
   let seller:WorkspaceRole=agent.role==='admin'?'admin':'agent';
   let onboarding:WorkspaceRole=null;
+  let csm:WorkspaceRole=null;
   if(hasSuper){
     const rows=await sql`SELECT is_super_admin FROM agents WHERE id=${agent.id}::uuid LIMIT 1`;
     isSuperAdmin=Boolean(rows[0]?.is_super_admin);
@@ -27,8 +28,9 @@ export async function currentUserAccess(){
     const map:any={}; for(const r of rows) map[r.workspace]=r.access_level;
     seller=(map.seller||null) as WorkspaceRole;
     onboarding=(map.onboarding||null) as WorkspaceRole;
+    csm=(map.csm||null) as WorkspaceRole;
   }
-  return {...agent,isSuperAdmin,access:{seller,onboarding}};
+  return {...agent,isSuperAdmin,access:{seller,onboarding,csm}};
 }
 
 export function canAccess(user:any,workspace:Workspace){
