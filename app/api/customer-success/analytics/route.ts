@@ -17,10 +17,9 @@ export async function GET(req:Request){
       FROM onboarding_events e
       JOIN onboarding_cases c ON c.id=e.onboarding_case_id
       WHERE e.event_date BETWEEN ${from}::date AND ${to}::date
-        AND c.ads_live_at IS NOT NULL
         AND (
           e.source_type='customer_success_followup'
-          OR (e.l0_code='OB_ADDITIONAL_TOPUP' AND e.event_time>=c.ads_live_at)
+          OR (c.ads_live_at IS NOT NULL AND e.l0_code='OB_ADDITIONAL_TOPUP' AND e.event_time>=c.ads_live_at)
         )
     )
     SELECT
@@ -46,11 +45,10 @@ export async function GET(req:Request){
       FROM onboarding_events e
       JOIN onboarding_cases c ON c.id=e.onboarding_case_id
       WHERE e.event_date BETWEEN ${from}::date AND ${to}::date
-        AND c.ads_live_at IS NOT NULL
         AND e.agent_id IS NOT NULL
         AND (
           e.source_type='customer_success_followup'
-          OR (e.l0_code='OB_ADDITIONAL_TOPUP' AND e.event_time>=c.ads_live_at)
+          OR (c.ads_live_at IS NOT NULL AND e.l0_code='OB_ADDITIONAL_TOPUP' AND e.event_time>=c.ads_live_at)
         )
     )
     SELECT a.id,a.name,

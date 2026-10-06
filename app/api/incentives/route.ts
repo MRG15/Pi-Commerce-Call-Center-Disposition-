@@ -29,11 +29,12 @@ export async function GET(req:Request){
       )
   `;
   // Renewals: up to 30 Sep they were seller sales for whoever logged them; from 1 Oct they are paid
-  // under the onboarder / CSM plan to the case owner before Ads Live, or whoever logged them after.
+  // under the onboarder / CSM plan to the case owner before Ads Live, or whoever logged them after
+  // (a CSM call always credits the CSM who logged it).
   const renewals=await sql`
     SELECT e.event_date::text AS date,e.customer_id,e.plan_amount_inr::float8 AS plan_amount,
       COALESCE(a.name,e.agent_name_raw,'Unknown') AS logged_by,
-      CASE WHEN oc.ads_live_at IS NULL OR e.event_time<oc.ads_live_at THEN COALESCE(o.name,a.name,e.agent_name_raw,'Unknown')
+      CASE WHEN e.source_type<>'customer_success_followup' AND (oc.ads_live_at IS NULL OR e.event_time<oc.ads_live_at) THEN COALESCE(o.name,a.name,e.agent_name_raw,'Unknown')
            ELSE COALESCE(a.name,e.agent_name_raw,'Unknown') END AS credited_to
     FROM onboarding_events e
     JOIN onboarding_cases oc ON oc.id=e.onboarding_case_id

@@ -38,9 +38,9 @@ export async function GET(req: Request) {
   let renewalRows:any[]=[];
   try{
     renewalRows=await sql`
-      -- A renewal before Ads Live belongs to the case owner; after Ads Live, to whoever logged it.
+      -- A renewal before Ads Live belongs to the case owner; after Ads Live, or on a CSM call, to whoever logged it.
       SELECT e.customer_id,e.event_date::text AS event_day,e.plan_amount_inr,
-        CASE WHEN oc.ads_live_at IS NULL OR e.event_time<oc.ads_live_at THEN COALESCE(o.name,a.name,e.agent_name_raw,'Unknown')
+        CASE WHEN e.source_type<>'customer_success_followup' AND (oc.ads_live_at IS NULL OR e.event_time<oc.ads_live_at) THEN COALESCE(o.name,a.name,e.agent_name_raw,'Unknown')
              ELSE COALESCE(a.name,e.agent_name_raw,'Unknown') END AS agent_name
       FROM onboarding_events e
       JOIN onboarding_cases oc ON oc.id=e.onboarding_case_id
