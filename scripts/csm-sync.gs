@@ -17,7 +17,7 @@ const CSM_SYNC = {
   SUB_SHEET: 'Sub Raw',
   ADS_SHEET: 'AdsRun Raw',
   TIMEZONE: 'Asia/Kolkata',
-  REFRESH_HOUR: 7,
+  REFRESH_HOUR: 9,  // after the AdsRun Raw Gmail import (~8:55 AM)
   BATCH_SIZE: 500,
 };
 
@@ -56,7 +56,7 @@ function installDailyCsmSyncTrigger() {
     .timeBased()
     .everyDays(1)
     .atHour(CSM_SYNC.REFRESH_HOUR)
-    .nearMinute(15)
+    .nearMinute(30)
     .inTimezone(CSM_SYNC.TIMEZONE)
     .create();
 }
