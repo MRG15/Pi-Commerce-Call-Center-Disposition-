@@ -13,11 +13,14 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
   const {id}=await params; const customerId=decodeURIComponent(id).trim();
   const sql=db();
   if(role==='agent'){
-    const own=await sql`SELECT 1 FROM csm_assignments WHERE customer_id=${customerId} AND agent_id=${user.id}::uuid`;
+    const own=await sql`
+      SELECT 1 FROM csm_assignments WHERE customer_id=${customerId} AND agent_id=${user.id}::uuid
+      UNION ALL SELECT 1 FROM (SELECT current_status FROM onboarding_cases WHERE customer_id=${customerId} ORDER BY created_at LIMIT 1) c WHERE c.current_status='lost'
+    `;
     if(!own[0]) return NextResponse.json({error:'This merchant is assigned to another CSM.'},{status:403});
   }
   const run=await latestCompleteRun(sql);
-  const sub=run?await sql`SELECT * FROM merchant_subscriptions WHERE sync_run_id=${run.id} AND customer_id=${customerId}`:[];
+  const sub=run?await sql`SELECT *,wallet_balance::float8 AS credits,cancelled_at::text AS cancelled_on,expected_renewal_due_date::text AS renewal_due,renewal_date::text AS renewed_on FROM merchant_subscriptions WHERE sync_run_id=${run.id} AND customer_id=${customerId}`:[];
   const ads=run?await sql`
     SELECT creative_name,description,ad_status,budget::float8 AS budget,start_date::text AS start_date,end_date::text AS end_date,
       impressions::float8 AS impressions,clicks::float8 AS clicks,ctr::float8 AS ctr,reach::float8 AS reach,spend::float8 AS spend,onboarded_date::text AS onboarded_date,mid
@@ -26,7 +29,7 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
   `:[];
   const notes=await sql`SELECT id,kind,note,note_date::text AS note_date,author_name,source,created_at FROM csm_notes WHERE customer_id=${customerId} ORDER BY note_date DESC,id DESC`;
   const cases=await sql`
-    SELECT c.id,c.current_status,c.current_l0,c.current_l1,c.sale_date::text AS sale_date,c.ads_live_at,c.closed_at,a.name AS owner
+    SELECT c.id,c.current_status,c.current_l0,c.current_l1,c.current_l2,c.sale_date::text AS sale_date,c.ads_live_at,c.closed_at,a.name AS owner
     FROM onboarding_cases c LEFT JOIN agents a ON a.id=c.assigned_to WHERE c.customer_id=${customerId} ORDER BY c.created_at LIMIT 1
   `;
   const events=await sql`

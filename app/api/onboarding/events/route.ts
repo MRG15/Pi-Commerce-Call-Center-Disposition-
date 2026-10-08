@@ -98,7 +98,8 @@ export async function POST(req:Request){
       if(l0Code==='OB_NOT_INTERESTED'||l0Code==='OB_REFUND_REQUESTED'){status='lost';closedAt=new Date();}
       await tx`
         UPDATE onboarding_cases SET current_l0=${l0.label},current_l1=${l1?.label||null},current_l2=${l2?.label||null},
-          current_status=${status},next_callback_at=${callback},last_activity_at=now(),ads_live_at=${adsLiveAt},closed_at=${closedAt},updated_at=now()
+          current_status=${status},next_callback_at=${callback},last_activity_at=now(),ads_live_at=${adsLiveAt},closed_at=${closedAt},updated_at=now(),
+          language_barrier_at=CASE WHEN ${l1Code}::text='OB_LANGUAGE_BARRIER' THEN COALESCE(language_barrier_at,now()) ELSE language_barrier_at END
         WHERE id=${caseId}::uuid
       `;
       if(l1Code==='OB_TECHNICAL'){

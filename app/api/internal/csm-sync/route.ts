@@ -13,7 +13,7 @@ function sameSecret(a:string,b:string){
   return aa.length===bb.length && timingSafeEqual(aa,bb);
 }
 const iso=(v:unknown)=>{const t=String(v??'').trim();return /^\d{4}-\d{2}-\d{2}$/.test(t)?t:null;};
-const num=(v:unknown)=>{const t=String(v??'').replace(/,/g,'').trim();if(!t)return null;const n=Number(t);return Number.isFinite(n)?n:null;};
+const num=(v:unknown)=>{const t=String(v??'').replace(/[^0-9.\-]/g,'').trim();if(!t)return null;const n=Number(t);return Number.isFinite(n)?n:null;};
 const txt=(v:unknown)=>{const t=String(v??'').trim();return t||null;};
 const custId=(v:unknown)=>{const t=String(v??'').trim().replace(/\.0$/,'');return /^\d+$/.test(t)?t:null;};
 
@@ -43,14 +43,21 @@ export async function POST(req:Request){
     for(const r of input){
       const id=custId(r.customerId); const status=String(r.status||'').trim().toUpperCase();
       if(!id||!['ACTIVE','CANCELLED','EXPIRED'].includes(status)){invalid.push(Number(r.sourceRow)||0);continue;}
-      rows.push({customer_id:id,status,merchant_name:txt(r.merchantName),phone_number:txt(r.phone),category:txt(r.category),sub_category:txt(r.subCategory),mcc:txt(r.mcc),sub_first_date:iso(r.subFirstDate)});
+      rows.push({customer_id:id,status,merchant_name:txt(r.merchantName),phone_number:txt(r.phone),category:txt(r.category),sub_category:txt(r.subCategory),mcc:txt(r.mcc),sub_first_date:iso(r.subFirstDate),
+        check_sub_status:txt(r.checkSubStatus),cancelled_at:iso(r.cancelledAt),expected_renewal_due_date:iso(r.renewalDueDate),renewal_date:iso(r.renewalDate),
+        completed_ads_count:num(r.completedAdsCount),wallet_balance:num(r.walletBalance)});
     }
     if(rows.length) await sql`
-      INSERT INTO merchant_subscriptions(sync_run_id,customer_id,status,merchant_name,phone_number,category,sub_category,mcc,sub_first_date)
-      SELECT ${runId},x.customer_id,x.status,x.merchant_name,x.phone_number,x.category,x.sub_category,x.mcc,x.sub_first_date::date
-      FROM jsonb_to_recordset(${sql.json(rows)}::jsonb) AS x(customer_id text,status text,merchant_name text,phone_number text,category text,sub_category text,mcc text,sub_first_date text)
+      INSERT INTO merchant_subscriptions(sync_run_id,customer_id,status,merchant_name,phone_number,category,sub_category,mcc,sub_first_date,
+        check_sub_status,cancelled_at,expected_renewal_due_date,renewal_date,completed_ads_count,wallet_balance)
+      SELECT ${runId},x.customer_id,x.status,x.merchant_name,x.phone_number,x.category,x.sub_category,x.mcc,x.sub_first_date::date,
+        x.check_sub_status,x.cancelled_at::date,x.expected_renewal_due_date::date,x.renewal_date::date,x.completed_ads_count::int,x.wallet_balance
+      FROM jsonb_to_recordset(${sql.json(rows)}::jsonb) AS x(customer_id text,status text,merchant_name text,phone_number text,category text,sub_category text,mcc text,sub_first_date text,
+        check_sub_status text,cancelled_at text,expected_renewal_due_date text,renewal_date text,completed_ads_count numeric,wallet_balance numeric)
       ON CONFLICT (sync_run_id,customer_id) DO UPDATE SET status=EXCLUDED.status,merchant_name=EXCLUDED.merchant_name,phone_number=EXCLUDED.phone_number,
-        category=EXCLUDED.category,sub_category=EXCLUDED.sub_category,mcc=EXCLUDED.mcc,sub_first_date=EXCLUDED.sub_first_date
+        category=EXCLUDED.category,sub_category=EXCLUDED.sub_category,mcc=EXCLUDED.mcc,sub_first_date=EXCLUDED.sub_first_date,
+        check_sub_status=EXCLUDED.check_sub_status,cancelled_at=EXCLUDED.cancelled_at,expected_renewal_due_date=EXCLUDED.expected_renewal_due_date,
+        renewal_date=EXCLUDED.renewal_date,completed_ads_count=EXCLUDED.completed_ads_count,wallet_balance=EXCLUDED.wallet_balance
     `;
     return NextResponse.json({ok:true,accepted:rows.length,invalidRows:invalid});
   }
