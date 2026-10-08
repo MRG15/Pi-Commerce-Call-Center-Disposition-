@@ -9,6 +9,9 @@ type SourceRow = {
   totalAdsExecuted?: unknown;
   firstAdDate?: unknown;
   sourceRow?: unknown;
+  totalImpressions?: unknown;
+  totalSpend?: unknown;
+  latestAdStatus?: unknown;
 };
 
 type NormalizedRow = {
@@ -17,7 +20,34 @@ type NormalizedRow = {
   totalAdsExecuted: number;
   firstAdDate: string | null;
   sourceRow: number | null;
+  // Delivery fields are only trusted when the script sent them (older script versions do not).
+  deliveryKnown: boolean;
+  totalImpressions: number;
+  totalSpend: number;
+  latestAdStatus: string;
 };
+
+// An onboarder-marked Ads Live case is checked against Sub Raw once it is at least a day old:
+//   REOPEN      – no ad has ever run (0 ads executed, 0 impressions, 0 spend)
+//   FLAG_FAILED – the ad did run (impressions or spend) but its latest status is FAILED
+//   OK          – anything else, including PAUSED and rows without delivery fields
+type LiveCheck='OK'|'REOPEN'|'FLAG_FAILED';
+
+function sheetNumber(value:unknown):number|null{
+  const t=String(value??'').replace(/,/g,'').trim();
+  if(!t) return 0;
+  const n=Number(t);
+  return Number.isFinite(n)&&n>=0?n:null;
+}
+
+function checkOnboarderLive(c:any,row:NormalizedRow,cutoffDate:string):LiveCheck{
+  if(c.current_status!=='ads_live' || c.has_external) return 'OK';
+  if(!c.ads_live_day || c.ads_live_day>cutoffDate) return 'OK';
+  if(!row.deliveryKnown || row.totalAdsExecuted>0) return 'OK';
+  if(row.totalImpressions===0 && row.totalSpend===0) return 'REOPEN';
+  if(row.latestAdStatus==='FAILED' && !c.failed_flagged) return 'FLAG_FAILED';
+  return 'OK';
+}
 
 function sameSecret(a:string,b:string){
   const aa=Buffer.from(a); const bb=Buffer.from(b);
@@ -36,12 +66,18 @@ function normalizeRow(raw:SourceRow):NormalizedRow|null{
   const sourceRowNumber=Number(raw.sourceRow);
   if(!/^\d+$/.test(customerId) || !isIsoDate(subFirstDate) || !Number.isFinite(ads) || ads<0) return null;
   if(firstAdDateRaw && !isIsoDate(firstAdDateRaw)) return null;
+  const impressions=raw.totalImpressions===undefined?null:sheetNumber(raw.totalImpressions);
+  const spend=raw.totalSpend===undefined?null:sheetNumber(raw.totalSpend);
   return {
     customerId,
     subFirstDate,
     totalAdsExecuted:ads,
     firstAdDate:firstAdDateRaw||null,
     sourceRow:Number.isInteger(sourceRowNumber)&&sourceRowNumber>0?sourceRowNumber:null,
+    deliveryKnown:impressions!==null&&spend!==null,
+    totalImpressions:impressions??0,
+    totalSpend:spend??0,
+    latestAdStatus:String(raw.latestAdStatus??'').trim().toUpperCase(),
   };
 }
 
@@ -100,6 +136,8 @@ export async function POST(req:Request){
     createdExternalLive:0,
     existingMarkedExternalLive:0,
     alreadyAdsLive:0,
+    adsLiveReopened:0,
+    adFailedAfterLiveFlagged:0,
     existingOpenNoChange:0,
     lostNoChange:0,
     lostMarkedExternalLive:0,
@@ -120,10 +158,13 @@ export async function POST(req:Request){
 
     if(dryRun){
       const existing=await sql`
-        SELECT id,current_status,ads_live_at
-        FROM onboarding_cases
-        WHERE customer_id=${row.customerId}
-        ORDER BY created_at ASC
+        SELECT c.id,c.current_status,c.ads_live_at,
+          (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date::text AS ads_live_day,
+          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_EXTERNAL_ADS_LIVE') AS has_external,
+          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_AD_FAILED_AFTER_LIVE') AS failed_flagged
+        FROM onboarding_cases c
+        WHERE c.customer_id=${row.customerId}
+        ORDER BY c.created_at ASC
         LIMIT 1
       `;
       const c:any=existing[0]||null;
@@ -137,7 +178,16 @@ export async function POST(req:Request){
           summary.actions.push({customerId:row.customerId,action:`CREATE_OPEN_${target.name.toUpperCase()}`});
         }
       }else if(c.current_status==='ads_live' || c.ads_live_at){
-        summary.alreadyAdsLive++;
+        const check=checkOnboarderLive(c,row,cutoffDate);
+        if(check==='REOPEN'){
+          summary.adsLiveReopened++;
+          summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
+        }else if(check==='FLAG_FAILED'){
+          summary.adFailedAfterLiveFlagged++;
+          summary.actions.push({customerId:row.customerId,action:'FLAG_AD_FAILED_AFTER_LIVE'});
+        }else{
+          summary.alreadyAdsLive++;
+        }
       }else if(c.current_status==='lost' && isLiveAsOfCutoff){
         summary.lostMarkedExternalLive++;
         summary.actions.push({customerId:row.customerId,action:'MARK_LOST_EXTERNAL_ADS_LIVE'});
@@ -157,12 +207,15 @@ export async function POST(req:Request){
     await sql.begin(async tx=>{
       await tx`SELECT pg_advisory_xact_lock(hashtext(${row.customerId}))`;
       const existing=await tx`
-        SELECT id,current_status,ads_live_at,assigned_to
-        FROM onboarding_cases
-        WHERE customer_id=${row.customerId}
-        ORDER BY created_at ASC
+        SELECT c.id,c.current_status,c.ads_live_at,c.assigned_to,
+          (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date::text AS ads_live_day,
+          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_EXTERNAL_ADS_LIVE') AS has_external,
+          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_AD_FAILED_AFTER_LIVE') AS failed_flagged
+        FROM onboarding_cases c
+        WHERE c.customer_id=${row.customerId}
+        ORDER BY c.created_at ASC
         LIMIT 1
-        FOR UPDATE
+        FOR UPDATE OF c
       `;
       const c:any=existing[0]||null;
 
@@ -224,7 +277,61 @@ export async function POST(req:Request){
       }
 
       if(c.current_status==='ads_live' || c.ads_live_at){
-        summary.alreadyAdsLive++;
+        const check=checkOnboarderLive(c,row,cutoffDate);
+        if(check==='OK'){
+          summary.alreadyAdsLive++;
+          return;
+        }
+        const checkAttemptRows=await tx`
+          SELECT COALESCE(MAX(attempt_number),0)+1 AS n
+          FROM onboarding_events
+          WHERE onboarding_case_id=${c.id}::uuid
+        `;
+        const checkAttempt=Number(checkAttemptRows[0]?.n||1);
+        if(check==='REOPEN'){
+          // Marked Ads Live by an onboarder, but Sub Raw shows no ad has ever run. Keep the
+          // onboarder's Ads Live entry in the history and put the case back in the open queue;
+          // clearing ads_live_at takes it out of the Ads Live counts, rate and incentives.
+          await tx`
+            INSERT INTO onboarding_events(
+              onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,source_row,
+              l0_code,l0_label_snapshot,remark
+            )
+            VALUES(
+              ${c.id}::uuid,${row.customerId},${checkAttempt},'system','Sub Raw',${row.sourceRow},
+              'SYSTEM_ADS_LIVE_NOT_VERIFIED','Ads Live Not Verified',
+              ${`Marked Ads Live on ${c.ads_live_day}, but Sub Raw shows no ad has run (0 ads executed, 0 impressions, 0 spend) as of ${cutoffDate}. Case reopened by the T-1 sync.`}
+            )
+          `;
+          await tx`
+            UPDATE onboarding_cases
+            SET current_l0='Ads Live Not Verified',current_l1=NULL,current_l2=NULL,current_status='open',
+                ads_live_at=NULL,closed_at=NULL,next_callback_at=now(),last_activity_at=now(),updated_at=now()
+            WHERE id=${c.id}::uuid
+          `;
+          summary.adsLiveReopened++;
+          summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
+          return;
+        }
+        // The ad did run and then failed: the case stays Ads Live, tagged once so it can be followed up.
+        await tx`
+          INSERT INTO onboarding_events(
+            onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,source_row,
+            l0_code,l0_label_snapshot,remark
+          )
+          VALUES(
+            ${c.id}::uuid,${row.customerId},${checkAttempt},'system','Sub Raw',${row.sourceRow},
+            'SYSTEM_AD_FAILED_AFTER_LIVE','Ad Failed After Live',
+            ${`Ad ran (${row.totalImpressions} impressions, Rs ${row.totalSpend} spent) and its latest status is FAILED as of ${cutoffDate}. Ads Live retained.`}
+          )
+        `;
+        await tx`
+          UPDATE onboarding_cases
+          SET current_l1='Ad Failed After Live',updated_at=now()
+          WHERE id=${c.id}::uuid
+        `;
+        summary.adFailedAfterLiveFlagged++;
+        summary.actions.push({customerId:row.customerId,action:'FLAG_AD_FAILED_AFTER_LIVE'});
         return;
       }
       if(c.current_status==='lost' && isLiveAsOfCutoff){
