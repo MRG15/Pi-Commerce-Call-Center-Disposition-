@@ -27,7 +27,7 @@
 .bucket-tiles b{display:block;font-size:28px;color:var(--navy)}
 .bucket-tiles span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;margin-top:4px}
 @media(max-width:760px){.bucket-tiles{grid-template-columns:repeat(3,1fr)}}
-.csm-tabs{grid-template-columns:repeat(5,1fr)}
+.csm-tabs{grid-template-columns:repeat(6,1fr)}
 .csm-filter{max-width:200px}
 .csm-sync-note{margin:0 0 10px}
 .case-list span.csm-pitch{color:var(--navy);font-weight:600}
@@ -44,3 +44,9 @@
 @media(max-width:760px){.csm-tabs{grid-template-columns:1fr 1fr}}
 @media(min-width:981px){.access-row{grid-template-columns:minmax(180px,1fr) repeat(3,150px) 120px auto}}
 @media(max-width:760px){.seller-shell{grid-template-columns:minmax(0,1fr)}.side-nav{overflow-x:auto}.side-nav button{white-space:nowrap;flex:0 0 auto}.csm-filter{max-width:none}}
+.csm-sub{margin:0}
+.csm-sub button.active{background:var(--navy);color:white;border-color:var(--navy)}
+.summary-grid .wide-cell{grid-column:1/-1}
+.lang-chip-row{margin-top:10px}
+.lang-chip{border:1px solid var(--border);background:#f8fafc;color:var(--muted);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer}
+.lang-chip.active{border-color:var(--navy);color:var(--navy);background:#eaf1ff}

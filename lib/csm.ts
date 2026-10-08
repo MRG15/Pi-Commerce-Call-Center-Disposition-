@@ -1,17 +1,20 @@
 // CSM workspace: merchants whose ads have gone live, worked by Customer Success Managers.
 //
-// A merchant is in the CSM workspace when, in the latest completed SMB Daily Tracker sync,
-// they have run at least one ad (AdsRun Raw) and the onboarding team has not closed their
-// case as lost (Not Interested / Refund Requested). Queues, as in the old Kunal tracker:
-//   ending  — subscription ACTIVE and an ad running now (soonest end first, then clicks)
-//   ended   — subscription ACTIVE, no ad running (most clicks first, then latest end)
-//   lapsed  — subscription CANCELLED or EXPIRED (cancelled first, then most ads run)
-// A merchant whose latest CSM disposition is Not Interested / Refund Requested moves to
-// "closed" until a CSM logs something else.
+// Built from the latest completed SMB Daily Tracker sync (Sub Raw + AdsRun Raw). A merchant is
+// in the CSM queues when their ads have run (rows in AdsRun Raw, or completed_ads_count > 0 in
+// Sub Raw). Every merchant lands in exactly one queue, checked in this order:
+//   onb_lost  — onboarding closed the case as Not Interested / Refund (shown for context, any ads)
+//   cancelled — subscription still ACTIVE but the merchant has cancelled (cancelled_at set)
+//   lapsed    — subscription CANCELLED or EXPIRED
+//   ending    — subscription active, an ad running now
+//   ended     — subscription active, no ad running
+// A merchant whose latest CSM call is Not Interested / Refund moves to "closed" until a CSM
+// logs something else.
 
 export const CSM_L0_CODES = ['OB_IN_PROCESS','OB_NOT_CONNECTED','OB_ADDITIONAL_TOPUP','OB_ANOTHER_AD_LIVE','OB_CREATIVE_UPDATED','OB_SUBS_RENEWED','OB_NOT_INTERESTED','OB_REFUND_REQUESTED'];
 export const CSM_CLOSING_CODES = ['OB_NOT_INTERESTED','OB_REFUND_REQUESTED'];
-export type CsmQueue = 'ending'|'ended'|'lapsed';
+export type CsmQueue = 'ending'|'ended'|'cancelled'|'lapsed'|'onb_lost';
+export const CSM_BUCKETS = ['ending','ended','cancelled','lapsed','closed','onb_lost'];
 
 export async function latestCompleteRun(sql:any):Promise<{id:number;finished_at:string;subs_rows:number;ads_rows:number}|null>{
   const ok=await sql`SELECT to_regclass('public.csm_sync_runs') IS NOT NULL AS ok`;
@@ -32,23 +35,29 @@ export async function csmMerchants(sql:any,runId:number){
         max(merchant_name) AS ad_merchant_name,max(phone_number) AS ad_phone
       FROM merchant_ads WHERE sync_run_id=${runId} GROUP BY customer_id
     ), cases AS (
-      SELECT DISTINCT ON (customer_id) id,customer_id,current_status,assigned_to,ads_live_at
+      SELECT DISTINCT ON (customer_id) id,customer_id,current_status,assigned_to,ads_live_at,closed_at,current_l0,current_l1,current_l2
       FROM onboarding_cases ORDER BY customer_id,created_at
     ), base AS (
       SELECT s.customer_id,s.status AS sub_status,
         COALESCE(NULLIF(s.merchant_name,''),a.ad_merchant_name) AS merchant_name,
         COALESCE(NULLIF(s.phone_number,''),a.ad_phone) AS phone_number,
         s.category,s.sub_category,s.mcc,s.sub_first_date,
-        a.total_ads,a.active_ads,a.completed_ads,
+        s.cancelled_at::text AS cancelled_at,s.expected_renewal_due_date::text AS renewal_due,s.renewal_date::text AS renewal_date,
+        s.completed_ads_count,s.wallet_balance::float8 AS credits,
+        COALESCE(a.total_ads,0) AS total_ads,COALESCE(a.active_ads,0) AS active_ads,COALESCE(a.completed_ads,0) AS completed_ads,
         c.id AS case_id,c.current_status AS case_status,owner.name AS onboarding_owner,
-        CASE WHEN s.status IN ('CANCELLED','EXPIRED') THEN 'lapsed'
-             WHEN a.active_ads>0 THEN 'ending'
+        CASE WHEN c.current_status='lost' THEN concat_ws(' → ',c.current_l0,c.current_l1,c.current_l2) END AS lost_reason,
+        CASE WHEN c.current_status='lost' THEN c.closed_at END AS lost_at,
+        CASE WHEN c.current_status='lost' THEN 'onb_lost'
+             WHEN upper(COALESCE(NULLIF(s.check_sub_status,''),s.status))='ACTIVE' AND s.cancelled_at IS NOT NULL THEN 'cancelled'
+             WHEN s.status IN ('CANCELLED','EXPIRED') THEN 'lapsed'
+             WHEN COALESCE(a.active_ads,0)>0 THEN 'ending'
              ELSE 'ended' END AS queue
       FROM subs s
-      JOIN ads a ON a.customer_id=s.customer_id AND a.total_ads>0
+      LEFT JOIN ads a ON a.customer_id=s.customer_id
       LEFT JOIN cases c ON c.customer_id=s.customer_id
       LEFT JOIN agents owner ON owner.id=c.assigned_to
-      WHERE COALESCE(c.current_status,'')<>'lost'
+      WHERE c.current_status='lost' OR COALESCE(a.total_ads,0)>0 OR COALESCE(s.completed_ads_count,0)>0
     ), cs AS (
       SELECT e.customer_id,e.event_time,e.l0_code,e.l0_label_snapshot,e.l1_label_snapshot,e.l2_label_snapshot,e.remark,e.callback_at,e.agent_name_raw,
         row_number() OVER (PARTITION BY e.customer_id ORDER BY e.event_time DESC,e.attempt_number DESC) AS rn
@@ -83,15 +92,15 @@ export async function csmMerchants(sql:any,runId:number){
       ca.last_outreach,ca.last_connect,COALESCE(ca.cs_calls,0) AS cs_calls,
       lc.l0_code AS last_l0_code,lc.l0_label_snapshot AS last_l0,lc.l1_label_snapshot AS last_l1,lc.l2_label_snapshot AS last_l2,
       lc.remark AS last_remark,lc.agent_name_raw AS last_by,lc.callback_at AS next_callback,
-      COALESCE(lc.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED'),FALSE) AS closed,
+      (b.queue<>'onb_lost' AND COALESCE(lc.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED'),FALSE)) AS closed,
       COALESCE(m.topups,0) AS topups,COALESCE(m.topup_total,0) AS topup_total,COALESCE(m.renewals,0) AS renewals,m.last_renewal_plan
     FROM base b
     LEFT JOIN LATERAL (
       SELECT * FROM merchant_ads x WHERE x.sync_run_id=${runId} AND x.customer_id=b.customer_id
       ORDER BY
-        CASE WHEN b.queue='ending' AND x.ad_status='ACTIVE' THEN 0 WHEN b.queue='ended' AND x.ad_status='COMPLETED' THEN 0 WHEN b.queue='lapsed' THEN 0 ELSE 1 END,
+        CASE WHEN b.queue='ending' AND x.ad_status='ACTIVE' THEN 0 WHEN b.queue<>'ending' AND x.ad_status='COMPLETED' THEN 0 ELSE 1 END,
         CASE WHEN b.queue='ending' THEN x.end_date END ASC NULLS LAST,
-        CASE WHEN b.queue='lapsed' THEN x.end_date END DESC NULLS LAST,
+        CASE WHEN b.queue<>'ending' THEN x.end_date END DESC NULLS LAST,
         x.clicks DESC NULLS LAST,
         x.end_date DESC NULLS LAST,
         x.source_row
@@ -107,16 +116,23 @@ export async function csmMerchants(sql:any,runId:number){
   `;
 }
 
-// Sort order inside each queue, matching the old sheet.
+// Default order inside each queue. The CSM screen can re-sort by impressions, spend or credits.
+//   cancelled — most credits first
+//   lapsed    — most recently due for renewal first (yesterday, D-2, ...), then most credits
+//   ending    — most impressions, then most spend
+//   ended     — most credits, then most impressions
+//   onb_lost  — most recently lost first
 export function sortQueue(rows:any[]){
-  const t=(d:any)=>d?new Date(d).getTime():Number.MAX_SAFE_INTEGER;
-  const qOrder:any={ending:0,ended:1,lapsed:2};
+  const t=(d:any)=>d?new Date(d).getTime():0;
+  const n=(v:any)=>Number(v)||0;
+  const qOrder:any={ending:0,ended:1,cancelled:2,lapsed:3,onb_lost:4};
   return [...rows].sort((a,b)=>{
     if(a.queue!==b.queue) return qOrder[a.queue]-qOrder[b.queue];
-    if(a.queue==='ending') return (t(a.end_date)-t(b.end_date))||((b.clicks||0)-(a.clicks||0));
-    if(a.queue==='ended') return ((b.clicks||0)-(a.clicks||0))||(t(b.end_date)-t(a.end_date));
-    if(a.sub_status!==b.sub_status) return a.sub_status==='CANCELLED'?-1:1;
-    return (b.total_ads||0)-(a.total_ads||0);
+    if(a.queue==='cancelled') return (n(b.credits)-n(a.credits))||(n(b.impressions)-n(a.impressions));
+    if(a.queue==='lapsed') return (t(b.renewal_due)-t(a.renewal_due))||(n(b.credits)-n(a.credits));
+    if(a.queue==='ending') return (n(b.impressions)-n(a.impressions))||(n(b.spend)-n(a.spend));
+    if(a.queue==='ended') return (n(b.credits)-n(a.credits))||(n(b.impressions)-n(a.impressions));
+    return t(b.lost_at)-t(a.lost_at);
   });
 }
 
@@ -131,7 +147,8 @@ export async function allocateUnassigned(sql:any,runId:number){
   if(!weights.length) return {assigned:0};
   const counts=await sql`SELECT agent_id,count(*)::int AS n FROM csm_assignments GROUP BY agent_id`;
   const load=new Map<string,number>(); for(const c of counts) load.set(String(c.agent_id),c.n);
-  const merchants=sortQueue(await csmMerchants(sql,runId)).filter((m:any)=>!m.assigned_to);
+  // Onboarding-lost merchants are shown to every CSM for context and are not allocated.
+  const merchants=sortQueue(await csmMerchants(sql,runId)).filter((m:any)=>!m.assigned_to&&m.queue!=='onb_lost');
   const picks:{customer_id:string;agent_id:string}[]=[];
   for(const m of merchants){
     let best:any=null,bestScore=Infinity;

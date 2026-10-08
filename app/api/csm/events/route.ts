@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { currentUserAccess } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
 import { PLANS,isPlanCode,plansRequiredOn,todayIst } from '@/lib/plans';
-import { CSM_L0_CODES,csmRole } from '@/lib/csm';
+import { CSM_BUCKETS,CSM_L0_CODES,csmRole } from '@/lib/csm';
 
 // Logs a CSM call on a live merchant. Saved as a customer_success_followup onboarding event,
 // exactly like post-live follow-ups before, so CSM analytics, incentives (top-ups, renewals)
@@ -19,6 +19,7 @@ export async function POST(req:Request){
   const remark=String(body.remark||'').trim()||null;
   const rawTopUp=body.topUpAmount; const topUp=rawTopUp===null||rawTopUp===undefined||String(rawTopUp).trim()===''?null:Number(rawTopUp);
   const planRaw=body.planCode?String(body.planCode):null;
+  const bucket=CSM_BUCKETS.includes(String(body.bucket))?String(body.bucket):null;
   if(!customerId||!CSM_L0_CODES.includes(l0Code)) return NextResponse.json({error:'Customer and outcome are required.'},{status:400});
   if(planRaw&&!isPlanCode(planRaw)) return NextResponse.json({error:'Invalid plan.'},{status:400});
   const sql=db();
@@ -28,8 +29,8 @@ export async function POST(req:Request){
       const cases=await tx`SELECT id,customer_id,current_status,assigned_to FROM onboarding_cases WHERE customer_id=${customerId} ORDER BY created_at LIMIT 1 FOR UPDATE`;
       const c=cases[0];
       if(!c) throw new Error('NO_CASE');
-      if(c.current_status==='lost') throw new Error('LOST');
-      if(role==='agent'){
+      // Onboarding-lost merchants are open to every CSM (low priority); others only to their CSM.
+      if(role==='agent'&&c.current_status!=='lost'){
         const own=await tx`SELECT 1 FROM csm_assignments WHERE customer_id=${customerId} AND agent_id=${user.id}::uuid`;
         if(!own[0]) throw new Error('NOT_ASSIGNED');
       }
@@ -53,9 +54,9 @@ export async function POST(req:Request){
       const att=await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${c.id}::uuid`;
       await tx`
         INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l2_code,
-          l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr,plan_code,plan_amount_inr)
+          l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr,plan_code,plan_amount_inr,csm_bucket)
         VALUES(${c.id}::uuid,${customerId},${Number(att[0].n)},${user.id}::uuid,${user.name},'customer_success_followup',${l0Code},${l1?.code||null},${l2?.code||null},
-          ${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${l0Code==='OB_ADDITIONAL_TOPUP'?topUp:null},${planCode},${planCode?PLANS[planCode].price:null})
+          ${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${l0Code==='OB_ADDITIONAL_TOPUP'?topUp:null},${planCode},${planCode?PLANS[planCode].price:null},${bucket})
       `;
       if(l1Code==='OB_TECHNICAL'){
         const open=await tx`SELECT id FROM technical_cases WHERE onboarding_case_id=${c.id}::uuid AND status='open' LIMIT 1`;
@@ -68,7 +69,7 @@ export async function POST(req:Request){
     });
     return NextResponse.json({ok:true});
   }catch(e:any){
-    const map:any={NO_CASE:['This merchant has no onboarding case yet, so a call cannot be logged.',409],LOST:['Onboarding closed this merchant as Not Interested / Refund.',409],
+    const map:any={NO_CASE:['This merchant has no onboarding case yet, so a call cannot be logged.',409],
       NOT_ASSIGNED:['This merchant is assigned to another CSM.',403],BAD_TAXONOMY:['Invalid outcome.',400],L1_REQUIRED:['Select a reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],
       L2_REQUIRED:['Select the technical issue.',400],REMARK_REQUIRED:['A remark is required for this option.',400],TOPUP_REQUIRED:['Enter the top-up amount.',400],
       PLAN_REQUIRED:['Select the plan renewed (Silver, Gold or Platinum).',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400]};

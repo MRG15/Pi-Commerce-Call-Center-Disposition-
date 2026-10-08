@@ -19,6 +19,7 @@ export async function GET(){
   `;
   if(!run) return NextResponse.json({role,me:{id:user.id,name:user.name},run:null,merchants:[],csms});
   let merchants=sortQueue(await csmMerchants(sql,run.id));
-  if(role==='agent') merchants=merchants.filter((m:any)=>String(m.assigned_to)===String(user.id));
+  // Agents see their own merchants; every CSM sees Onboarding Lost (context, not allocated).
+  if(role==='agent') merchants=merchants.filter((m:any)=>m.queue==='onb_lost'||String(m.assigned_to)===String(user.id));
   return NextResponse.json({role,me:{id:user.id,name:user.name},run,merchants,csms});
 }

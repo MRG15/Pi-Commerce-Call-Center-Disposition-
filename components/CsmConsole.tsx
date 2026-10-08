@@ -5,7 +5,9 @@ import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
 
 type Node={id:string;code:string;label:string;level:number;parent_id:string|null};
 type View='queues'|'callbacks'|'metrics'|'notes'|'allocation';
-type Tab='ending'|'ended'|'lapsed'|'closed'|'all';
+type Tab='ending'|'ended'|'cx'|'closed'|'onb_lost'|'all';
+type CxSub=''|'cancelled'|'lapsed';
+type SortBy='default'|'impressions'|'spend'|'credits';
 
 function fmt(v:any){if(!v)return '—';return new Date(v).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'});}
 function fmtDay(v:any){if(!v)return '—';const d=new Date(String(v).slice(0,10)+'T00:00:00');return d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit'});}
@@ -14,14 +16,16 @@ function num(v:any){const n=Number(v);return v===null||v===undefined||!Number.is
 function daysSince(v:any){if(!v)return null;return Math.floor((Date.now()-new Date(v).getTime())/86400000);}
 function daysTo(day:any){if(!day)return null;const t=new Date(String(day).slice(0,10)+'T00:00:00+05:30').getTime();return Math.ceil((t-Date.now())/86400000);}
 function disp(l0?:string,l1?:string,l2?:string){return [l0,l1,l2].filter(Boolean).join(' → ');}
-const TABS:[Tab,string][]=[['ending','Ads About to End'],['ended','Ads Ended'],['lapsed','Cancelled / Expired'],['closed','Closed (NI / Refund)'],['all','All']];
-const QUEUE_LABEL:any={ending:'Ad running',ended:'Ads ended',lapsed:'Cancelled / Expired',closed:'Closed'};
+const TABS:[Tab,string][]=[['ending','Ads About to End'],['ended','Ads Ended'],['cx','Cancelled / Expired'],['closed','Closed (NI / Refund)'],['onb_lost','Onboarding Lost'],['all','All']];
+const QUEUE_LABEL:any={ending:'Ads About to End',ended:'Ads Ended',cancelled:'Cancelled, subscription still active',lapsed:'Expired / Cancelled, not renewed',closed:'Closed (NI / Refund)',onb_lost:'Onboarding Lost',untagged:'Calls before buckets (untagged)'};
+const SORTS:[SortBy,string][]=[['default','Default order'],['impressions','Impressions'],['spend','Spend'],['credits','Credits']];
 const SOURCE_LABEL:any={customer_success_followup:'CSM',new_event:'Onboarding',historical_import:'Imported',assignment:'Assignment',system:'System'};
 
 export default function CsmConsole(){
   const router=useRouter();
   const [user,setUser]=useState<any>(null),[data,setData]=useState<any>(null),[nodes,setNodes]=useState<Node[]>([]);
   const [view,setView]=useState<View>('queues'),[tab,setTab]=useState<Tab>('ending'),[search,setSearch]=useState(''),[csmFilter,setCsmFilter]=useState('');
+  const [cxSub,setCxSub]=useState<CxSub>(''),[sortBy,setSortBy]=useState<SortBy>('default');
   const [selected,setSelected]=useState<any>(null),[detailLoading,setDetailLoading]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true);
 
   async function loadMerchants(){
@@ -49,13 +53,16 @@ export default function CsmConsole(){
 
   const admin=data?.role==='admin';
   const merchants:any[]=data?.merchants||[];
-  const pool=useMemo(()=>merchants.filter(m=>!csmFilter||(csmFilter==='none'?!m.assigned_to:String(m.assigned_to)===csmFilter)),[merchants,csmFilter]);
-  const tabOf=(m:any):Tab=>m.closed?'closed':m.queue;
-  const counts=useMemo(()=>{const c:any={ending:0,ended:0,lapsed:0,closed:0,all:pool.length};for(const m of pool)c[tabOf(m)]++;return c;},[pool]);
+  // Onboarding Lost is shared context for every CSM, so the CSM filter never hides it.
+  const pool=useMemo(()=>merchants.filter(m=>!csmFilter||m.queue==='onb_lost'||(csmFilter==='none'?!m.assigned_to:String(m.assigned_to)===csmFilter)),[merchants,csmFilter]);
+  const tabOf=(m:any):Tab=>m.closed?'closed':(m.queue==='cancelled'||m.queue==='lapsed')?'cx':m.queue;
+  const counts=useMemo(()=>{const c:any={ending:0,ended:0,cx:0,closed:0,onb_lost:0,cancelled:0,lapsed:0,all:pool.length};for(const m of pool){c[tabOf(m)]++;if(!m.closed&&(m.queue==='cancelled'||m.queue==='lapsed'))c[m.queue]++;}return c;},[pool]);
   const shown=useMemo(()=>{
     const q=search.trim().toLowerCase(),qd=q.replace(/\D/g,'');
-    return pool.filter(m=>(tab==='all'||tabOf(m)===tab)&&(!q||String(m.customer_id).includes(q)||String(m.merchant_name||'').toLowerCase().includes(q)||(qd.length>=4&&String(m.phone_number||'').replace(/\D/g,'').includes(qd))));
-  },[pool,tab,search]);
+    const rows=pool.filter(m=>(tab==='all'||tabOf(m)===tab)&&(tab!=='cx'||!cxSub||m.queue===cxSub)&&(!q||String(m.customer_id).includes(q)||String(m.merchant_name||'').toLowerCase().includes(q)||(qd.length>=4&&String(m.phone_number||'').replace(/\D/g,'').includes(qd))));
+    if(sortBy==='default')return rows;
+    return [...rows].sort((a,b)=>(Number(b[sortBy])||0)-(Number(a[sortBy])||0));
+  },[pool,tab,cxSub,search,sortBy]);
   const callbacks=useMemo(()=>pool.filter(m=>m.next_callback&&!m.closed).sort((a,b)=>new Date(a.next_callback).getTime()-new Date(b.next_callback).getTime()),[pool]);
   const dueCallbacks=callbacks.filter(m=>new Date(m.next_callback).getTime()<=new Date(todayIst()+'T23:59:59+05:30').getTime()).length;
 
@@ -76,15 +83,18 @@ export default function CsmConsole(){
         {!data?.run&&<div className="card empty">No SMB Daily Tracker data yet. The queues fill after the first daily sync (Sub Raw + AdsRun Raw) completes.</div>}
         {data?.run&&view!=='notes'&&view!=='allocation'&&<div className="note csm-sync-note">Data as of {fmt(data.run.finished_at)} · {num(data.run.subs_rows)} subscriptions · {num(data.run.ads_rows)} ads</div>}
         {(view==='queues'||view==='callbacks')&&<section className="card">
-          {view==='queues'&&<div className="queue-tabs csm-tabs">{TABS.map(([k,l])=><button key={k} className={tab===k?'active':''} onClick={()=>setTab(k)}><b>{counts[k]}</b><span>{l}</span></button>)}</div>}
+          {view==='queues'&&<div className="queue-tabs csm-tabs">{TABS.map(([k,l])=><button key={k} className={tab===k?'active':''} onClick={()=>{setTab(k);setCxSub('');}}><b>{counts[k]}</b><span>{l}</span></button>)}</div>}
+          {view==='queues'&&tab==='cx'&&<div className="preset-row csm-sub padtop">{([['','All',counts.cx],['cancelled','Cancelled, subscription still active',counts.cancelled],['lapsed','Expired / Cancelled, not renewed',counts.lapsed]] as [CxSub,string,number][]).map(([k,l,n])=><button key={k||'all'} className={cxSub===k?'active':''} onClick={()=>setCxSub(k)}>{l} ({n})</button>)}</div>}
+          {view==='queues'&&tab==='onb_lost'&&<div className="note">Merchants onboarding closed as Not Interested / Refund. Shown so you can see why they are not in your calling queues (usually Meta was never linked). Lowest priority; call only if you choose to.</div>}
           <div className="search-row padtop">
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search merchant, customer ID or phone"/>
+            {view==='queues'&&<select className="csm-filter" value={sortBy} onChange={e=>setSortBy(e.target.value as SortBy)}>{SORTS.map(([k,l])=><option key={k} value={k}>{k==='default'?l:`Sort: ${l}`}</option>)}</select>}
             {admin&&<select className="csm-filter" value={csmFilter} onChange={e=>setCsmFilter(e.target.value)}><option value="">All CSMs</option>{(data?.csms||[]).map((c:any)=><option key={c.id} value={c.id}>{c.name}</option>)}<option value="none">Unassigned</option></select>}
           </div>
         </section>}
         {(view==='queues'||view==='callbacks')&&<div className="onboarding-grid">
           <section className="card">
-            <div className="section-label">{view==='callbacks'?'Callbacks':TABS.find(t=>t[0]===tab)?.[1]}</div>
+            <div className="section-label">{view==='callbacks'?'Callbacks':tab==='cx'&&cxSub?QUEUE_LABEL[cxSub]:TABS.find(t=>t[0]===tab)?.[1]}</div>
             <MerchantList rows={view==='callbacks'?callbacks.filter(m=>{const q=search.trim().toLowerCase();return !q||String(m.customer_id).includes(q)||String(m.merchant_name||'').toLowerCase().includes(q);}):shown} selectedId={selected?.customerId} onOpen={openMerchant} admin={admin} callbacks={view==='callbacks'}/>
           </section>
           <section className="card case-detail">
@@ -94,7 +104,7 @@ export default function CsmConsole(){
                 onSaved={async()=>{await loadMerchants();await openMerchant(selected.customerId);}}/>}
           </section>
         </div>}
-        {view==='metrics'&&<Metrics admin={admin}/>}
+        {view==='metrics'&&<Metrics admin={admin} csms={data?.csms||[]} onOpenBucket={(b:string)=>{setView('queues');setCxSub(b==='cancelled'||b==='lapsed'?b:'');setTab(b==='cancelled'||b==='lapsed'?'cx':(TABS.some(t=>t[0]===b)?b as Tab:'all'));}}/>}
         {view==='notes'&&admin&&<PitchNotes onSaved={loadMerchants}/>}
         {view==='allocation'&&admin&&<Allocation data={data} reload={loadMerchants}/>}
       </main>
@@ -109,16 +119,18 @@ function MerchantList({rows,selectedId,onOpen,admin,callbacks}:{rows:any[];selec
     const overdue=m.next_callback&&new Date(m.next_callback).getTime()<Date.now();
     return <button key={m.customer_id} onClick={()=>onOpen(String(m.customer_id))} className={String(selectedId)===String(m.customer_id)?'selected':''}>
       <div><strong>{m.merchant_name||`Customer ${m.customer_id}`}</strong>
-        <span>Cust ID {m.customer_id}{admin?` · ${m.assigned_name||'Unassigned'}`:''}{m.sub_status!=='ACTIVE'?` · ${m.sub_status}`:''}</span>
+        <span>Cust ID {m.customer_id}{admin&&m.queue!=='onb_lost'?` · ${m.assigned_name||'Unassigned'}`:''}{m.sub_status!=='ACTIVE'?` · ${m.sub_status}`:''}</span>
         {m.pitch&&<span className="csm-pitch">Pitch: {m.pitch}</span>}
       </div>
       <div className="case-tags">
         {callbacks&&<em className={overdue?'tag-warn':''}>Callback {fmt(m.next_callback)}</em>}
         {m.queue==='ending'&&<em className={left!==null&&left<=2?'tag-warn':''}>Ends {fmtDay(m.end_date)}{left!==null?` (${left<=0?'today':left+'d'})`:''}</em>}
         {m.queue==='ended'&&m.end_date&&<em>Ended {fmtDay(m.end_date)}</em>}
-        {m.queue==='lapsed'&&<em>{m.total_ads} ad{m.total_ads===1?'':'s'} run</em>}
-        <em>{num(m.clicks)} clicks</em>
-        {m.budget!=null&&<em>Budget {money(m.budget)}</em>}
+        {m.queue==='cancelled'&&<em className="tag-warn">Cancelled {fmtDay(m.cancelled_at)}, sub still active</em>}
+        {m.queue==='lapsed'&&<em className="tag-warn">{m.renewal_due?`Renewal due ${fmtDay(m.renewal_due)}${daysSince(m.renewal_due)!==null&&daysSince(m.renewal_due)!>=0?` (${daysSince(m.renewal_due)}d ago)`:''}`:'Renewal date not in sheet'}</em>}
+        {m.queue==='onb_lost'&&<><em className="tag-warn">Lost {fmtDay(m.lost_at)}</em>{m.lost_reason&&<em>{m.lost_reason}</em>}{m.onboarding_owner&&<em>Onboarder {m.onboarding_owner}</em>}</>}
+        {m.credits!=null&&<em>Credits {money(m.credits)}</em>}
+        {m.queue!=='onb_lost'&&<><em>{num(m.impressions)} impr.</em><em>Spend {money(m.spend)}</em><em>{num(m.clicks)} clicks</em></>}
         <em>{m.last_outreach?`Called ${since===0?'today':since+'d ago'}`:'Never called'}</em>
         {m.last_l0&&<em>{m.last_l0}</em>}
         {m.topups>0&&<em>Top-ups {money(m.topup_total)}</em>}
@@ -138,14 +150,15 @@ function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node
   const callbackRequired=l1==='OB_CALLBACK'; const callbackAvailable=!topUpMode&&!!l0;
   const s=data.subscription||{}; const m=data.merchant||{}; const c=data.case;
   const pitches=data.notes.filter((n:any)=>n.kind==='pitch'); const remarks=data.notes.filter((n:any)=>n.kind==='sheet_remark');
-  const canLog=Boolean(c)&&c.current_status!=='lost';
+  const canLog=Boolean(c); const onbLost=c?.current_status==='lost';
   const invalid=!l0||(l1s.length>0&&!l1&&!topUpMode)||(l2s.length>0&&!l2)||(callbackRequired&&(!cbDate||!cbTime))||(topUpMode&&!(Number(topUp)>0))||(planRequired&&!plan);
 
   async function save(){
     if(callbackAvailable&&Boolean(cbDate)!==Boolean(cbTime)){setErr('Enter both callback date and time, or leave both blank.');return;}
     setSaving(true);setErr('');setMsg('');
     const r=await fetch('/api/csm/events',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({customerId:data.customerId,l0Code:l0,l1Code:l1||null,l2Code:l2||null,remark,
-      callbackDate:callbackAvailable&&cbDate?cbDate:null,callbackTime:callbackAvailable&&cbTime?cbTime:null,topUpAmount:topUpMode?topUp:null,planCode:planNeeded&&plan?plan:null})});
+      callbackDate:callbackAvailable&&cbDate?cbDate:null,callbackTime:callbackAvailable&&cbTime?cbTime:null,topUpAmount:topUpMode?topUp:null,planCode:planNeeded&&plan?plan:null,
+      bucket:row?(row.closed?'closed':row.queue):null})});
     const j=await r.json(); setSaving(false);
     if(!r.ok){setErr(j.error||'Could not save');return;}
     setMsg('Call logged.'); await onSaved();
@@ -171,6 +184,10 @@ function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node
       <div><span>Category</span><b>{[s.category||m.category,s.sub_category||m.sub_category].filter(Boolean).join(' / ')||'—'}</b></div>
       <div><span>Subscription</span><b>{s.status||'—'}{s.sub_first_date?` · since ${fmtDay(s.sub_first_date)}`:''}</b></div>
       <div><span>Queue</span><b>{row?QUEUE_LABEL[row.closed?'closed':row.queue]:'—'}</b></div>
+      <div><span>Credits (wallet)</span><b>{s.credits!=null?money(s.credits):'—'}</b></div>
+      <div><span>Renewal due / renewed</span><b>{s.renewal_due?fmtDay(s.renewal_due):'—'}{s.renewed_on?` · renewed ${fmtDay(s.renewed_on)}`:''}</b></div>
+      <div><span>Cancelled on</span><b>{s.cancelled_on?fmtDay(s.cancelled_on):'—'}</b></div>
+      {onbLost&&<div className="wide-cell"><span>Onboarding closed as</span><b>{disp(c.current_l0,c.current_l1,c.current_l2)||'Lost'}{c.owner?` · by ${c.owner}`:''}</b></div>}
       <div><span>CSM</span><b>{data.assignment?.name||'Unassigned'}</b></div>
       <div><span>Onboarded by</span><b>{c?.owner||'—'}{c?.ads_live_at?` · live ${fmtDay(c.ads_live_at)}`:''}</b></div>
       <div><span>Top-ups / Renewals</span><b>{row?`${money(row.topup_total)} (${row.topups}) · ${row.renewals} renewal${row.renewals===1?'':'s'}`:'—'}</b></div>
@@ -192,7 +209,7 @@ function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node
 
     <div className="section-label subhead">Log Call</div>
     {!c?<div className="empty">This merchant has no onboarding case in the portal, so calls can't be logged yet. Ask an onboarding admin to add the case.</div>:
-     !canLog?<div className="empty">Onboarding closed this merchant as Not Interested / Refund.</div>:<>
+     <>{onbLost&&<div className="note">Onboarding closed this merchant as Not Interested / Refund. Low priority; log a call only if you choose to call.</div>}
       <div className="form-grid">
         <label>Outcome<select value={l0} onChange={e=>{setL0(e.target.value);setL1('');setL2('');setCbDate('');setCbTime('');setTopUp('');setPlan('');}}><option value="">Select outcome</option>{l0s.map(n=><option key={n.id} value={n.code}>{n.label}</option>)}</select></label>
         {l1s.length>0&&<label>Reason<select value={l1} onChange={e=>{setL1(e.target.value);setL2('');}}><option value="">Select reason</option>{l1s.map(n=><option key={n.id} value={n.code}>{n.label}</option>)}</select></label>}
@@ -217,11 +234,11 @@ function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node
   </>;
 }
 
-function Metrics({admin}:{admin:boolean}){
+function Metrics({admin,csms,onOpenBucket}:{admin:boolean;csms:any[];onOpenBucket:(b:string)=>void}){
   const today=todayIst();
   const minus=(n:number)=>new Date(new Date(today+'T00:00:00Z').getTime()-n*86400000).toISOString().slice(0,10);
-  const [from,setFrom]=useState(minus(6)),[to,setTo]=useState(today),[res,setRes]=useState<any>(null),[loading,setLoading]=useState(false);
-  async function load(f=from,t=to){setFrom(f);setTo(t);setLoading(true);const r=await fetch(`/api/csm/metrics?from=${f}&to=${t}`,{cache:'no-store'});setLoading(false);if(r.ok)setRes(await r.json());}
+  const [from,setFrom]=useState(minus(6)),[to,setTo]=useState(today),[res,setRes]=useState<any>(null),[loading,setLoading]=useState(false),[csm,setCsm]=useState('');
+  async function load(f=from,t=to,who=csm){setFrom(f);setTo(t);setCsm(who);setLoading(true);const r=await fetch(`/api/csm/metrics?from=${f}&to=${t}${who?`&csm=${who}`:''}`,{cache:'no-store'});setLoading(false);if(r.ok)setRes(await r.json());}
   useEffect(()=>{load();},[]);
   const totals=useMemo(()=>{
     const by=new Map<string,any>();
@@ -233,9 +250,14 @@ function Metrics({admin}:{admin:boolean}){
   return <>
     <section className="card"><div className="section-label">Daily Metrics</div>
       <div className="preset-row"><button onClick={()=>load(today,today)}>Today</button><button onClick={()=>load(minus(1),minus(1))}>Yesterday</button><button onClick={()=>load(minus(6),today)}>Last 7 days</button><button onClick={()=>load(today.slice(0,8)+'01',today)}>This month</button></div>
-      <div className="range-row"><label>From<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>To<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label><button className="primary" disabled={loading} onClick={()=>load()}>{loading?'Loading…':'Apply'}</button></div>
+      <div className="range-row"><label>From<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>To<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label>{admin&&<label>CSM<select value={csm} onChange={e=>load(from,to,e.target.value)}><option value="">All CSMs</option>{csms.filter((x:any)=>x.access_level==="agent"||Number(x.weight)>0).map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}<button className="primary" disabled={loading} onClick={()=>load()}>{loading?'Loading…':'Apply'}</button></div>
       <div className="note">Counts every CSM call logged in the range (IST). "Merchants called" in the totals adds up daily unique merchants.</div>
     </section>
+    <section className="card"><div className="section-label">By bucket</div><div className="table-scroll"><table className="split leads-table">
+      <thead><tr><th>Bucket</th><th>Merchants now</th><th>Never called</th><th>Merchants called</th><th>Calls</th><th>Didn't pick</th><th>Connected</th><th>Callbacks set</th><th>Top-ups</th><th>Top-up ₹</th><th>Renewals</th><th>NI / Refund</th></tr></thead>
+      <tbody>{(res?.buckets||[]).length===0?<tr><td colSpan={12}>No data.</td></tr>:(res?.buckets||[]).map((b:any)=><tr key={b.bucket_key} className={b.bucket_key!=='untagged'?'clickable':''} onClick={()=>b.bucket_key!=='untagged'&&onOpenBucket(b.bucket_key)}>
+        <td>{QUEUE_LABEL[b.bucket_key]||b.bucket_key}</td><td>{num(b.merchants)}</td><td>{num(b.neverCalled)}</td><td>{num(b.merchants_called)}</td><td>{num(b.calls)}</td><td>{num(b.not_connected)}</td><td>{num(b.connected)}</td><td>{num(b.callbacks)}</td><td>{num(b.topups)}</td><td>{money(b.topup_amount)}</td><td>{num(b.renewals)}</td><td>{num(b.lost)}</td></tr>)}</tbody></table></div>
+      <div className="note">"Merchants now" and "Never called" are today's queues. The call columns count calls in the date range, by the bucket the merchant was in when called. Click a bucket to open it.</div></section>
     <section className="card"><div className="section-label">Totals by CSM</div><div className="table-scroll"><table className="split leads-table"><thead><tr><th>CSM</th>{cols.map(c=><th key={c[0]}>{c[1]}</th>)}</tr></thead>
       <tbody>{totals.length===0?<tr><td colSpan={cols.length+1}>No calls in this range.</td></tr>:totals.map(t=><tr key={t.name}><td>{t.name}</td>{cols.map(c=><td key={c[0]}>{c[2](t[c[0]])}</td>)}</tr>)}</tbody></table></div></section>
     <section className="card"><div className="section-label">Day by day</div><div className="table-scroll"><table className="split leads-table"><thead><tr><th>Day</th><th>CSM</th>{cols.map(c=><th key={c[0]}>{c[1]}</th>)}</tr></thead>
@@ -278,7 +300,7 @@ function Allocation({data,reload}:{data:any;reload:()=>Promise<void>}){
   const csms:any[]=data?.csms||[];
   const [weights,setWeights]=useState<any>(()=>Object.fromEntries(csms.map(c=>[c.id,String(c.weight)])));
   const [ids,setIds]=useState(''),[to,setTo]=useState(''),[msg,setMsg]=useState(''),[busy,setBusy]=useState(false);
-  const counts=useMemo(()=>{const c:any={};for(const m of data?.merchants||[]){const k=m.assigned_to||'none';c[k]=c[k]||{total:0,ending:0,ended:0,lapsed:0,closed:0};c[k].total++;c[k][m.closed?'closed':m.queue]++;}return c;},[data]);
+  const counts=useMemo(()=>{const c:any={};for(const m of data?.merchants||[]){const k=m.assigned_to||'none';if(m.queue==='onb_lost')continue;c[k]=c[k]||{total:0,ending:0,ended:0,lapsed:0,closed:0};c[k].total++;c[k][m.closed?'closed':m.queue==='cancelled'?'lapsed':m.queue]++;}return c;},[data]);
   async function post(body:any){setBusy(true);setMsg('');const r=await fetch('/api/csm/assignments',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json();setBusy(false);if(!r.ok){setMsg(j.error||'Failed');return null;}await reload();return j;}
   const agents=csms.filter(c=>c.access_level==='agent'||Number(c.weight)>0);
   return <>

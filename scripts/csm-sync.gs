@@ -3,7 +3,11 @@
  *
  * Replaces the Kunal tracker script. Sends the full "Sub Raw" and "AdsRun Raw" tabs to the
  * portal every morning; the portal builds the CSM queues (Ads About to End, Ads Ended,
- * Cancelled & Expired) from them.
+ * Cancelled / Expired, Onboarding Lost) from them.
+ *
+ * Sub Raw columns used: merchant_cust_id, subscription_status, check sub status, cancelled_at,
+ * expected_renewal_due_date, renewal_date, completed_ads_count, current_wallet_balance,
+ * merchant_name, phone_number, category, sub_category, mcc_code, sub_first_date.
  *
  * Add this file to the same Apps Script project as the Sub Raw onboarding sync.
  * Script Properties required:
@@ -78,6 +82,12 @@ function readSubs_(sheet) {
       subCategory: cell_(row, data.col, 'sub_category'),
       mcc: cell_(row, data.col, 'mcc_code'),
       subFirstDate: date_(data.raw[i][data.col.sub_first_date]),
+      checkSubStatus: cell_(row, data.col, 'check_sub_status').toUpperCase(),
+      cancelledAt: date_(data.raw[i][data.col.cancelled_at]),
+      renewalDueDate: date_(data.raw[i][data.col.expected_renewal_due_date]),
+      renewalDate: date_(data.raw[i][data.col.renewal_date]),
+      completedAdsCount: cell_(row, data.col, 'completed_ads_count'),
+      walletBalance: cell_(row, data.col, 'current_wallet_balance'),
       sourceRow: i + 2,
     };
   });
@@ -125,7 +135,14 @@ function readTab_(sheet, required) {
   const raw = range.getValues();
   if (display.length < 2) throw new Error('No data rows in "' + sheet.getName() + '".');
   const col = {};
-  display[0].forEach(function (h, i) { const k = String(h || '').trim(); if (k) col[k] = i; });
+  // Headers are matched as written and also normalised ("Check Sub Status" -> check_sub_status).
+  display[0].forEach(function (h, i) {
+    const k = String(h || '').trim();
+    if (!k) return;
+    if (col[k] === undefined) col[k] = i;
+    const n = k.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    if (col[n] === undefined) col[n] = i;
+  });
   const missing = required.filter(function (h) { return col[h] === undefined; });
   if (missing.length) throw new Error('Missing columns in "' + sheet.getName() + '": ' + missing.join(', '));
   return { col: col, rows: display.slice(1), raw: raw.slice(1) };

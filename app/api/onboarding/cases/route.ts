@@ -18,7 +18,7 @@ export async function GET(req:Request){
   const filterByAgent=Boolean(all&&assignedTo);
   const cases=await sql`
     SELECT c.id,c.customer_id,c.source_type,c.sale_date,c.assigned_to,c.assigned_at,c.current_l0,c.current_l1,c.current_l2,
-      c.current_status,c.next_callback_at,c.last_activity_at,c.ads_live_at,c.closed_at,c.created_at,c.updated_at,
+      c.current_status,c.next_callback_at,c.last_activity_at,c.ads_live_at,c.closed_at,c.created_at,c.updated_at,c.language_barrier_at,
       a.name AS assigned_name,
       m.merchant_name,m.phone_number,m.category,m.sub_category,
       GREATEST(0,(
