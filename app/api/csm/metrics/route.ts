@@ -39,23 +39,13 @@ export async function GET(req:Request){
       AND (${agentFilter}::uuid IS NULL OR e.agent_id=${agentFilter}::uuid)
     GROUP BY 1,2,3 ORDER BY 1 DESC,3
   `;
-  // Calls in the range by the bucket the merchant was in when called (tagged on each call).
-  const byBucket=await sql`
-    SELECT COALESCE(e.csm_bucket,'untagged') AS bucket,
-      count(DISTINCT e.customer_id)::int AS merchants_called,
-      count(*)::int AS calls,
-      count(*) FILTER (WHERE e.l0_code='OB_NOT_CONNECTED')::int AS not_connected,
-      count(*) FILTER (WHERE e.l0_code<>'OB_NOT_CONNECTED')::int AS connected,
-      count(*) FILTER (WHERE e.l1_code='OB_CALLBACK')::int AS callbacks,
-      count(*) FILTER (WHERE e.l0_code='OB_ADDITIONAL_TOPUP')::int AS topups,
-      COALESCE(sum(e.top_up_amount_inr) FILTER (WHERE e.l0_code='OB_ADDITIONAL_TOPUP'),0)::float8 AS topup_amount,
-      count(*) FILTER (WHERE e.l0_code='OB_SUBS_RENEWED')::int AS renewals,
-      count(*) FILTER (WHERE e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED'))::int AS lost
+  // Calls in the range, one row each; grouped by bucket below.
+  const bucketCalls=await sql`
+    SELECT e.customer_id,e.csm_bucket,e.l0_code,e.l1_code,e.top_up_amount_inr::float8 AS top_up
     FROM onboarding_events e
     WHERE e.source_type='customer_success_followup'
       AND (e.event_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
       AND (${agentFilter}::uuid IS NULL OR e.agent_id=${agentFilter}::uuid)
-    GROUP BY 1
   `;
   // Coverage: of the merchants in each queue now, how many were called in the last 7 days.
   const run=await latestCompleteRun(sql);
@@ -82,7 +72,23 @@ export async function GET(req:Request){
     }
     coverage=[...groups.values()].sort((a,b)=>a.csm.localeCompare(b.csm)||a.queue.localeCompare(b.queue));
   }
-  const called=new Map<string,any>(); for(const r of byBucket as any[]) called.set(r.bucket,r);
+  // Each call counts under the merchant's current bucket, so the numbers move with the merchant.
+  // (The bucket at call time is stored too; it is only used if the merchant has left the queues.)
+  const currentBucket=new Map<string,string>();
+  if(run) for(const m of await csmMerchants(sql,run.id) as any[]) currentBucket.set(String(m.customer_id),m.closed?'closed':m.queue);
+  const called=new Map<string,any>(); const seen=new Map<string,Set<string>>();
+  for(const e of bucketCalls as any[]){
+    const k=currentBucket.get(String(e.customer_id))||e.csm_bucket||'untagged';
+    const g=called.get(k)||{merchants_called:0,calls:0,not_connected:0,connected:0,callbacks:0,topups:0,topup_amount:0,renewals:0,lost:0};
+    const ids=seen.get(k)||new Set<string>(); if(!ids.has(e.customer_id)){ids.add(e.customer_id);g.merchants_called++;} seen.set(k,ids);
+    g.calls++;
+    if(e.l0_code==='OB_NOT_CONNECTED') g.not_connected++; else g.connected++;
+    if(e.l1_code==='OB_CALLBACK') g.callbacks++;
+    if(e.l0_code==='OB_ADDITIONAL_TOPUP'){g.topups++;g.topup_amount+=Number(e.top_up)||0;}
+    if(e.l0_code==='OB_SUBS_RENEWED') g.renewals++;
+    if(e.l0_code==='OB_NOT_INTERESTED'||e.l0_code==='OB_REFUND_REQUESTED') g.lost++;
+    called.set(k,g);
+  }
   const order=['ending','ended','cancelled','lapsed','closed','onb_lost','untagged'];
   const buckets=order.filter(k=>bucketNow.has(k)||called.has(k)).map(k=>({bucket:k,...(bucketNow.get(k)||{merchants:0,neverCalled:0}),
     ...(called.get(k)||{merchants_called:0,calls:0,not_connected:0,connected:0,callbacks:0,topups:0,topup_amount:0,renewals:0,lost:0}),bucket_key:k}));
