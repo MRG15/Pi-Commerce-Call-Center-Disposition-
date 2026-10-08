@@ -13,8 +13,9 @@ export async function pickOnboarder(preferredId?:string|null){
     `;
     if(rows[0]) return rows[0];
   }
-  // Automatic routing is deliberately restricted to Onboarding Agents.
-  // Admins/Super Admins manage the queue but are not auto-assigned operational work.
+  const roster=await loadOnboardingRoster(sql);
+  if(roster.length) return takeNextOnboarder(roster);
+  // No roster set up: fall back to the Onboarding Agent with the fewest open cases.
   const rows=await sql`
     SELECT a.id,a.name,
       COUNT(c.id) FILTER (WHERE c.current_status='open')::int AS open_count,
@@ -28,6 +29,33 @@ export async function pickOnboarder(preferredId?:string|null){
     LIMIT 1
   `;
   return rows[0]||null;
+}
+
+// New cases are shared equally among the onboarding roster: each goes to whoever has received
+// the fewest cases since the roster started (ties: longest since their last case). Existing
+// cases are never moved.
+export async function loadOnboardingRoster(sql:any):Promise<{id:string;name:string;count:number;last:number}[]>{
+  const ok=await sql`SELECT to_regclass('public.onboarding_roster') IS NOT NULL AS ok`;
+  if(!ok[0]?.ok) return [];
+  const rows=await sql`
+    WITH r AS (
+      SELECT a.id,a.name,(SELECT min(added_at) FROM onboarding_roster) AS since
+      FROM onboarding_roster o JOIN agents a ON a.id=o.agent_id
+      JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding'
+      WHERE a.active=TRUE
+    )
+    SELECT r.id,r.name,
+      (SELECT count(*)::int FROM onboarding_cases c WHERE c.assigned_to=r.id AND c.created_at>=r.since) AS count,
+      (SELECT max(c.created_at) FROM onboarding_cases c WHERE c.assigned_to=r.id) AS last
+    FROM r ORDER BY r.name
+  `;
+  return rows.map((x:any)=>({id:String(x.id),name:x.name,count:Number(x.count),last:x.last?new Date(x.last).getTime():0}));
+}
+
+export function takeNextOnboarder(roster:{id:string;name:string;count:number;last:number}[]){
+  const next=[...roster].sort((a,b)=>(a.count-b.count)||(a.last-b.last)||a.name.localeCompare(b.name))[0];
+  next.count++; next.last=Date.now();
+  return {id:next.id,name:next.name};
 }
 
 export function toIstCallback(date?:string|null,time?:string|null){

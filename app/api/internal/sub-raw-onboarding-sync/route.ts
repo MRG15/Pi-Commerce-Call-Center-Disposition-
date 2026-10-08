@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { loadOnboardingRoster,takeNextOnboarder } from '@/lib/onboarding';
 
 type SourceRow = {
   customerId?: unknown;
@@ -82,23 +83,20 @@ export async function POST(req:Request){
   }
 
   const sql=db();
-  const people=await sql`
-    SELECT a.id,a.name
-    FROM agents a
-    JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding'
-    WHERE a.active=TRUE AND a.name IN ('Dhruv','Ashish')
-  `;
-  const byName:any={}; for(const p of people) byName[p.name]=p;
-  if(!byName.Dhruv || !byName.Ashish){
-    return NextResponse.json({error:'Dhruv and Ashish must both be active with Onboarding access.'},{status:409});
+  // New open cases are shared equally among the onboarding roster (lib/onboarding.ts).
+  const roster=await loadOnboardingRoster(sql);
+  if(!roster.length){
+    return NextResponse.json({error:'No active onboarders in the onboarding roster.'},{status:409});
   }
 
   const summary={
     inputRows:input.length,
     eligibleRows:deduped.size,
     invalidRows,
+    createdOpen:0,
     createdOpenDhruv:0,
     createdOpenAshish:0,
+    createdOpenPriyanshi:0,
     createdExternalLive:0,
     existingMarkedExternalLive:0,
     alreadyAdsLive:0,
@@ -118,9 +116,7 @@ export async function POST(req:Request){
       continue;
     }
 
-    const ageRows=await sql`SELECT (${cutoffDate}::date - ${row.subFirstDate}::date)::int AS age_days`;
-    const ageDays=Number(ageRows[0]?.age_days||0);
-    const target=isLiveAsOfCutoff?null:(ageDays>=3?byName.Dhruv:byName.Ashish);
+    const countCreated=(name:string)=>{summary.createdOpen++;const k=`createdOpen${name}`;(summary as any)[k]=((summary as any)[k]||0)+1;};
 
     if(dryRun){
       const existing=await sql`
@@ -135,12 +131,10 @@ export async function POST(req:Request){
         if(isLiveAsOfCutoff){
           summary.createdExternalLive++;
           summary.actions.push({customerId:row.customerId,action:'CREATE_EXTERNAL_ADS_LIVE'});
-        }else if(target?.name==='Dhruv'){
-          summary.createdOpenDhruv++;
-          summary.actions.push({customerId:row.customerId,action:'CREATE_OPEN_DHRUV'});
         }else{
-          summary.createdOpenAshish++;
-          summary.actions.push({customerId:row.customerId,action:'CREATE_OPEN_ASHISH'});
+          const target=takeNextOnboarder(roster);
+          countCreated(target.name);
+          summary.actions.push({customerId:row.customerId,action:`CREATE_OPEN_${target.name.toUpperCase()}`});
         }
       }else if(c.current_status==='ads_live' || c.ads_live_at){
         summary.alreadyAdsLive++;
@@ -202,6 +196,7 @@ export async function POST(req:Request){
           summary.createdExternalLive++;
           summary.actions.push({customerId:row.customerId,action:'CREATE_EXTERNAL_ADS_LIVE'});
         }else{
+          const target=takeNextOnboarder(roster);
           const created=await tx`
             INSERT INTO onboarding_cases(
               customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at
@@ -222,9 +217,8 @@ export async function POST(req:Request){
               'SYSTEM_ASSIGNED','Assigned',${`Assigned to ${target.name} by Sub Raw T-1 sync`}
             )
           `;
-          if(target.name==='Dhruv') summary.createdOpenDhruv++;
-          else summary.createdOpenAshish++;
-          summary.actions.push({customerId:row.customerId,action:target.name==='Dhruv'?'CREATE_OPEN_DHRUV':'CREATE_OPEN_ASHISH'});
+          countCreated(target.name);
+          summary.actions.push({customerId:row.customerId,action:`CREATE_OPEN_${target.name.toUpperCase()}`});
         }
         return;
       }
