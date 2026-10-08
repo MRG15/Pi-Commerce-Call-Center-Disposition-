@@ -50,3 +50,5 @@
 .lang-chip-row{margin-top:10px}
 .lang-chip{border:1px solid var(--border);background:#f8fafc;color:var(--muted);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer}
 .lang-chip.active{border-color:var(--navy);color:var(--navy);background:#eaf1ff}
+.csv-btn{border:1px solid var(--border);background:white;color:var(--navy);border-radius:7px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:14px}
+.csv-btn:hover{border-color:var(--navy)}

@@ -2,6 +2,7 @@
 import { useEffect,useMemo,useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
+import { downloadCsv,type CsvColumn } from '@/lib/csv';
 
 type Node={id:string;code:string;label:string;level:number;parent_id:string|null};
 type View='queues'|'callbacks'|'metrics'|'notes'|'allocation';
@@ -21,6 +22,19 @@ function daysTo(day:any){if(!day)return null;const t=new Date(String(day).slice(
 function disp(l0?:string,l1?:string,l2?:string){return [l0,l1,l2].filter(Boolean).join(' → ');}
 const TABS:[Tab,string][]=[['ending','Ads About to End'],['ended','Ads Ended'],['cx','Cancelled / Expired'],['closed','Closed (NI / Refund)'],['onb_lost','Onboarding Lost'],['all','All']];
 const QUEUE_LABEL:any={ending:'Ads About to End',ended:'Ads Ended',cancelled:'Cancelled, subscription still active',lapsed:'Expired / Cancelled, not renewed',closed:'Closed (NI / Refund)',onb_lost:'Onboarding Lost',untagged:'Calls before buckets (untagged)'};
+// CSV of the merchants on screen (current tab, sub-bucket, filters and search).
+const CSM_CSV:CsvColumn<any>[]=[
+  ['Cust ID',m=>m.customer_id],['Merchant',m=>m.merchant_name],['Phone',m=>m.phone_number],['CSM',m=>m.queue==='onb_lost'?'':m.assigned_name],
+  ['Bucket',m=>QUEUE_LABEL[m.closed?'closed':m.queue]],['Subscription status',m=>m.sub_status],['Cancelled on',m=>m.cancelled_at],
+  ['Renewal due',m=>m.renewal_due],['Renewed on',m=>m.renewal_date],['Credits',m=>m.credits],['Ads run',m=>m.total_ads||m.completed_ads_count],
+  ['Ads running',m=>m.active_ads],['Ad end date',m=>m.end_date],['Impressions',m=>m.impressions],['Spend',m=>m.spend],['Clicks',m=>m.clicks],
+  ['Call status',m=>({never:'Never called',not_connected:'Called, not connected',connected:'Connected'} as any)[callStateOf(m)]],['CSM calls',m=>m.cs_calls],
+  ['Last call',m=>m.last_outreach?new Date(m.last_outreach).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):''],
+  ['Last outcome',m=>disp(m.last_l0,m.last_l1,m.last_l2)],['Last remark',m=>m.last_remark],['Last called by',m=>m.last_by],
+  ['Next callback',m=>m.next_callback?new Date(m.next_callback).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):''],
+  ['Top-ups',m=>m.topups],['Top-up total',m=>m.topup_total],['Renewals',m=>m.renewals],['Pitch note',m=>m.pitch],
+  ['Onboarded by',m=>m.onboarding_owner],['Onboarding lost reason',m=>m.lost_reason],['Lost on',m=>m.lost_at?String(m.lost_at).slice(0,10):''],
+];
 const SORTS:[SortBy,string][]=[['default','Default order'],['impressions','Impressions'],['spend','Spend'],['credits','Credits']];
 const SOURCE_LABEL:any={customer_success_followup:'CSM',new_event:'Onboarding',historical_import:'Imported',assignment:'Assignment',system:'System'};
 
@@ -99,7 +113,8 @@ export default function CsmConsole(){
         </section>}
         {(view==='queues'||view==='callbacks')&&<div className="onboarding-grid">
           <section className="card">
-            <div className="section-label">{view==='callbacks'?'Callbacks':tab==='cx'&&cxSub?QUEUE_LABEL[cxSub]:TABS.find(t=>t[0]===tab)?.[1]}</div>
+            <div className="leads-head"><div className="section-label">{view==='callbacks'?'Callbacks':tab==='cx'&&cxSub?QUEUE_LABEL[cxSub]:TABS.find(t=>t[0]===tab)?.[1]}</div>
+              {admin&&<button className="csv-btn" onClick={()=>{const rows=view==='callbacks'?callbacks:shown;const name=view==='callbacks'?'callbacks':tab==='cx'&&cxSub?cxSub:tab;downloadCsv(`csm-${name}-${todayIst()}.csv`,CSM_CSV,rows);}}>Download CSV</button>}</div>
             <MerchantList rows={view==='callbacks'?callbacks.filter(m=>{const q=search.trim().toLowerCase();return !q||String(m.customer_id).includes(q)||String(m.merchant_name||'').toLowerCase().includes(q);}):shown} selectedId={selected?.customerId} onOpen={openMerchant} admin={admin} callbacks={view==='callbacks'}/>
           </section>
           <section className="card case-detail">
