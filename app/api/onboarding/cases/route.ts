@@ -30,6 +30,9 @@ export async function GET(req:Request){
         - (c.last_activity_at AT TIME ZONE 'Asia/Kolkata')::date
       ))::int END AS days_since_last_activity,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.source_type IN ('new_event','historical_import')) AS touches,
+      (SELECT e.remark FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.remark IS NOT NULL AND e.source_type IN ('new_event','historical_import')
+        ORDER BY e.event_time DESC,e.attempt_number DESC LIMIT 1) AS latest_remark,
+      (SELECT t.issue_label FROM technical_cases t WHERE t.onboarding_case_id=c.id ORDER BY t.opened_at DESC LIMIT 1) AS latest_tech_issue,
       CASE WHEN ${filterByDate} THEN
         (
           (CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END) <= ${to||null}::date
