@@ -72,13 +72,13 @@ export async function GET(req:Request){
     }
     coverage=[...groups.values()].sort((a,b)=>a.csm.localeCompare(b.csm)||a.queue.localeCompare(b.queue));
   }
-  // Each call counts under the bucket the merchant was in when called. Calls logged before
-  // buckets were recorded count under the merchant's current bucket.
+  // Each call counts under the merchant's current bucket, so the numbers move with the merchant.
+  // (The bucket at call time is stored too; it is only used if the merchant has left the queues.)
   const currentBucket=new Map<string,string>();
   if(run) for(const m of await csmMerchants(sql,run.id) as any[]) currentBucket.set(String(m.customer_id),m.closed?'closed':m.queue);
   const called=new Map<string,any>(); const seen=new Map<string,Set<string>>();
   for(const e of bucketCalls as any[]){
-    const k=e.csm_bucket||currentBucket.get(String(e.customer_id))||'untagged';
+    const k=currentBucket.get(String(e.customer_id))||e.csm_bucket||'untagged';
     const g=called.get(k)||{merchants_called:0,calls:0,not_connected:0,connected:0,callbacks:0,topups:0,topup_amount:0,renewals:0,lost:0};
     const ids=seen.get(k)||new Set<string>(); if(!ids.has(e.customer_id)){ids.add(e.customer_id);g.merchants_called++;} seen.set(k,ids);
     g.calls++;
