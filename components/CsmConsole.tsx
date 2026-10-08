@@ -8,6 +8,9 @@ type View='queues'|'callbacks'|'metrics'|'notes'|'allocation';
 type Tab='ending'|'ended'|'cx'|'closed'|'onb_lost'|'all';
 type CxSub=''|'cancelled'|'lapsed';
 type SortBy='default'|'impressions'|'spend'|'credits';
+type CallFilter=''|'never'|'not_connected'|'connected';
+// never = no CSM call yet; not_connected = called but never got through; connected = got through at least once.
+const callStateOf=(m:any):CallFilter=>!m.last_outreach?'never':m.last_connect?'connected':'not_connected';
 
 function fmt(v:any){if(!v)return '—';return new Date(v).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'});}
 function fmtDay(v:any){if(!v)return '—';const d=new Date(String(v).slice(0,10)+'T00:00:00');return d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit'});}
@@ -25,7 +28,7 @@ export default function CsmConsole(){
   const router=useRouter();
   const [user,setUser]=useState<any>(null),[data,setData]=useState<any>(null),[nodes,setNodes]=useState<Node[]>([]);
   const [view,setView]=useState<View>('queues'),[tab,setTab]=useState<Tab>('ending'),[search,setSearch]=useState(''),[csmFilter,setCsmFilter]=useState('');
-  const [cxSub,setCxSub]=useState<CxSub>(''),[sortBy,setSortBy]=useState<SortBy>('default');
+  const [cxSub,setCxSub]=useState<CxSub>(''),[sortBy,setSortBy]=useState<SortBy>('default'),[callFilter,setCallFilter]=useState<CallFilter>('');
   const [selected,setSelected]=useState<any>(null),[detailLoading,setDetailLoading]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true);
 
   async function loadMerchants(){
@@ -54,7 +57,8 @@ export default function CsmConsole(){
   const admin=data?.role==='admin';
   const merchants:any[]=data?.merchants||[];
   // Onboarding Lost is shared context for every CSM, so the CSM filter never hides it.
-  const pool=useMemo(()=>merchants.filter(m=>!csmFilter||m.queue==='onb_lost'||(csmFilter==='none'?!m.assigned_to:String(m.assigned_to)===csmFilter)),[merchants,csmFilter]);
+  // The call-status filter applies before counting, so the tab counts match the filter.
+  const pool=useMemo(()=>merchants.filter(m=>(!csmFilter||m.queue==='onb_lost'||(csmFilter==='none'?!m.assigned_to:String(m.assigned_to)===csmFilter))&&(!callFilter||callStateOf(m)===callFilter)),[merchants,csmFilter,callFilter]);
   const tabOf=(m:any):Tab=>m.closed?'closed':(m.queue==='cancelled'||m.queue==='lapsed')?'cx':m.queue;
   const counts=useMemo(()=>{const c:any={ending:0,ended:0,cx:0,closed:0,onb_lost:0,cancelled:0,lapsed:0,all:pool.length};for(const m of pool){c[tabOf(m)]++;if(!m.closed&&(m.queue==='cancelled'||m.queue==='lapsed'))c[m.queue]++;}return c;},[pool]);
   const shown=useMemo(()=>{
@@ -88,6 +92,7 @@ export default function CsmConsole(){
           {view==='queues'&&tab==='onb_lost'&&<div className="note">Merchants onboarding closed as Not Interested / Refund. Shown so you can see why they are not in your calling queues (usually Meta was never linked). Lowest priority; call only if you choose to.</div>}
           <div className="search-row padtop">
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search merchant, customer ID or phone"/>
+            {view==='queues'&&<select className="csm-filter" value={callFilter} onChange={e=>setCallFilter(e.target.value as CallFilter)}><option value="">All call status</option><option value="never">Never called</option><option value="not_connected">Called, not connected</option><option value="connected">Connected</option></select>}
             {view==='queues'&&<select className="csm-filter" value={sortBy} onChange={e=>setSortBy(e.target.value as SortBy)}>{SORTS.map(([k,l])=><option key={k} value={k}>{k==='default'?l:`Sort: ${l}`}</option>)}</select>}
             {admin&&<select className="csm-filter" value={csmFilter} onChange={e=>setCsmFilter(e.target.value)}><option value="">All CSMs</option>{(data?.csms||[]).map((c:any)=><option key={c.id} value={c.id}>{c.name}</option>)}<option value="none">Unassigned</option></select>}
           </div>
@@ -257,7 +262,7 @@ function Metrics({admin,csms,onOpenBucket}:{admin:boolean;csms:any[];onOpenBucke
       <thead><tr><th>Bucket</th><th>Merchants now</th><th>Never called</th><th>Merchants called</th><th>Calls</th><th>Didn't pick</th><th>Connected</th><th>Callbacks set</th><th>Top-ups</th><th>Top-up ₹</th><th>Renewals</th><th>NI / Refund</th></tr></thead>
       <tbody>{(res?.buckets||[]).length===0?<tr><td colSpan={12}>No data.</td></tr>:(res?.buckets||[]).map((b:any)=><tr key={b.bucket_key} className={b.bucket_key!=='untagged'?'clickable':''} onClick={()=>b.bucket_key!=='untagged'&&onOpenBucket(b.bucket_key)}>
         <td>{QUEUE_LABEL[b.bucket_key]||b.bucket_key}</td><td>{num(b.merchants)}</td><td>{num(b.neverCalled)}</td><td>{num(b.merchants_called)}</td><td>{num(b.calls)}</td><td>{num(b.not_connected)}</td><td>{num(b.connected)}</td><td>{num(b.callbacks)}</td><td>{num(b.topups)}</td><td>{money(b.topup_amount)}</td><td>{num(b.renewals)}</td><td>{num(b.lost)}</td></tr>)}</tbody></table></div>
-      <div className="note">"Merchants now" and "Never called" are today's queues. The call columns count calls in the date range, by the bucket the merchant was in when called. Click a bucket to open it.</div></section>
+      <div className="note">"Merchants now" and "Never called" are today's queues. The call columns count calls in the date range, by the bucket the merchant was in when called (calls before 8 Oct: the merchant's current bucket). Click a bucket to open it.</div></section>
     <section className="card"><div className="section-label">Totals by CSM</div><div className="table-scroll"><table className="split leads-table"><thead><tr><th>CSM</th>{cols.map(c=><th key={c[0]}>{c[1]}</th>)}</tr></thead>
       <tbody>{totals.length===0?<tr><td colSpan={cols.length+1}>No calls in this range.</td></tr>:totals.map(t=><tr key={t.name}><td>{t.name}</td>{cols.map(c=><td key={c[0]}>{c[2](t[c[0]])}</td>)}</tr>)}</tbody></table></div></section>
     <section className="card"><div className="section-label">Day by day</div><div className="table-scroll"><table className="split leads-table"><thead><tr><th>Day</th><th>CSM</th>{cols.map(c=><th key={c[0]}>{c[1]}</th>)}</tr></thead>
