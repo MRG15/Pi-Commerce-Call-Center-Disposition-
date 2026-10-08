@@ -86,8 +86,8 @@ function readSubs_(sheet) {
       cancelledAt: date_(data.raw[i][data.col.cancelled_at]),
       renewalDueDate: date_(data.raw[i][data.col.expected_renewal_due_date]),
       renewalDate: date_(data.raw[i][data.col.renewal_date]),
-      completedAdsCount: cell_(row, data.col, 'completed_ads_count'),
-      walletBalance: cell_(row, data.col, 'current_wallet_balance'),
+      completedAdsCount: num_(data.raw[i][data.col.completed_ads_count]),
+      walletBalance: num_(data.raw[i][data.col.current_wallet_balance]),
       sourceRow: i + 2,
     };
   });
@@ -150,6 +150,13 @@ function readTab_(sheet, required) {
 
 function cell_(row, col, header) {
   return col[header] === undefined ? '' : String(row[col[header]] || '').trim();
+}
+
+/** A plain number from a cell, ignoring ₹ signs and commas. Blank when there is no number. */
+function num_(value) {
+  if (typeof value === 'number') return isNaN(value) ? '' : value;
+  const t = String(value === undefined || value === null ? '' : value).replace(/[^0-9.\-]/g, '');
+  return t === '' || isNaN(Number(t)) ? '' : Number(t);
 }
 
 function date_(value) {

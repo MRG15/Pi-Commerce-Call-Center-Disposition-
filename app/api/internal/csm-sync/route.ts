@@ -13,7 +13,7 @@ function sameSecret(a:string,b:string){
   return aa.length===bb.length && timingSafeEqual(aa,bb);
 }
 const iso=(v:unknown)=>{const t=String(v??'').trim();return /^\d{4}-\d{2}-\d{2}$/.test(t)?t:null;};
-const num=(v:unknown)=>{const t=String(v??'').replace(/,/g,'').trim();if(!t)return null;const n=Number(t);return Number.isFinite(n)?n:null;};
+const num=(v:unknown)=>{const t=String(v??'').replace(/[^0-9.\-]/g,'').trim();if(!t)return null;const n=Number(t);return Number.isFinite(n)?n:null;};
 const txt=(v:unknown)=>{const t=String(v??'').trim();return t||null;};
 const custId=(v:unknown)=>{const t=String(v??'').trim().replace(/\.0$/,'');return /^\d+$/.test(t)?t:null;};
 
