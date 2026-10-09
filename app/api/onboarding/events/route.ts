@@ -99,7 +99,8 @@ export async function POST(req:Request){
       await tx`
         UPDATE onboarding_cases SET current_l0=${l0.label},current_l1=${l1?.label||null},current_l2=${l2?.label||null},
           current_status=${status},next_callback_at=${callback},last_activity_at=now(),ads_live_at=${adsLiveAt},closed_at=${closedAt},updated_at=now(),
-          language_barrier_at=CASE WHEN ${l1Code}::text='OB_LANGUAGE_BARRIER' THEN COALESCE(language_barrier_at,now()) ELSE language_barrier_at END
+          language_barrier_at=CASE WHEN ${l1Code}::text='OB_LANGUAGE_BARRIER' THEN COALESCE(language_barrier_at,now()) ELSE language_barrier_at END,
+          reopen_reason=CASE WHEN ${l0Code}::text='OB_ADS_LIVE' THEN NULL ELSE reopen_reason END
         WHERE id=${caseId}::uuid
       `;
       if(l1Code==='OB_TECHNICAL'){

@@ -10,6 +10,8 @@
 //   ended     — subscription active, no ad running
 // A merchant whose latest CSM call is Not Interested / Refund moves to "closed" until a CSM
 // logs something else.
+// Merchants whose onboarding case the Sub Raw sync reopened (no ad ran, or the ad failed) stay
+// with onboarding and are left out until the first ad is properly live.
 
 export const CSM_L0_CODES = ['OB_IN_PROCESS','OB_NOT_CONNECTED','OB_ADDITIONAL_TOPUP','OB_ANOTHER_AD_LIVE','OB_CREATIVE_UPDATED','OB_SUBS_RENEWED','OB_NOT_INTERESTED','OB_REFUND_REQUESTED'];
 export const CSM_CLOSING_CODES = ['OB_NOT_INTERESTED','OB_REFUND_REQUESTED'];
@@ -35,7 +37,7 @@ export async function csmMerchants(sql:any,runId:number){
         max(merchant_name) AS ad_merchant_name,max(phone_number) AS ad_phone
       FROM merchant_ads WHERE sync_run_id=${runId} GROUP BY customer_id
     ), cases AS (
-      SELECT DISTINCT ON (customer_id) id,customer_id,current_status,assigned_to,ads_live_at,closed_at,current_l0,current_l1,current_l2
+      SELECT DISTINCT ON (customer_id) id,customer_id,current_status,assigned_to,ads_live_at,closed_at,current_l0,current_l1,current_l2,reopen_reason
       FROM onboarding_cases ORDER BY customer_id,created_at
     ), base AS (
       SELECT s.customer_id,s.status AS sub_status,
@@ -57,7 +59,9 @@ export async function csmMerchants(sql:any,runId:number){
       LEFT JOIN ads a ON a.customer_id=s.customer_id
       LEFT JOIN cases c ON c.customer_id=s.customer_id
       LEFT JOIN agents owner ON owner.id=c.assigned_to
-      WHERE c.current_status='lost' OR COALESCE(a.total_ads,0)>0 OR COALESCE(s.completed_ads_count,0)>0
+      WHERE (c.current_status='lost' OR COALESCE(a.total_ads,0)>0 OR COALESCE(s.completed_ads_count,0)>0)
+        -- Reopened by the onboarding sync (no ad ran / ad failed): onboarding owns them until the first ad is live.
+        AND NOT (c.current_status='open' AND c.reopen_reason IS NOT NULL)
     ), cs AS (
       SELECT e.customer_id,e.event_time,e.l0_code,e.l0_label_snapshot,e.l1_label_snapshot,e.l2_label_snapshot,e.remark,e.callback_at,e.agent_name_raw,
         row_number() OVER (PARTITION BY e.customer_id ORDER BY e.event_time DESC,e.attempt_number DESC) AS rn
