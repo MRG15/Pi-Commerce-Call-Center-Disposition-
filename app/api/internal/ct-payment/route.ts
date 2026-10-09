@@ -6,10 +6,10 @@ import { loadOnboardingRoster,pickOnboarder,takeNextOnboarder } from '@/lib/onbo
 
 // CleverTap (PPSL) webhook for the pic_subscription / payment_success event. Field sales reach the
 // portal here in real time instead of the next day's Sub Raw sync:
-//   - flow=subscribe with an employee code and no onboarding case yet -> the case is created now,
-//     assigned through the onboarding roster like any new case, and keeps the employee code.
-//     Sales without an employee code are left to the seller's Send to Onboarding (so the seller
-//     handoff is not pre-empted) or the next day's sync.
+//   - flow=subscribe and no onboarding case yet -> the case is created now, assigned through the
+//     onboarding roster like any new case, with the employee code when CT sends one (optional).
+//     Whichever comes first opens the case: seller Send to Onboarding, this webhook, or the next
+//     day's Sub Raw sync; the others then leave it as is.
 //   - a case already exists (seller handoff, earlier sync) -> nothing moves; the employee code is
 //     added to it if it has none
 //   - other flows (upgrade) -> only the event is stored
@@ -93,7 +93,7 @@ export async function POST(req:Request){
         action='existing';
         if(r.employeeCode&&!existing[0].sold_by_employee_code)
           await tx`UPDATE onboarding_cases SET sold_by_employee_code=${r.employeeCode},updated_at=now() WHERE id=${existing[0].id}::uuid`;
-      }else if(r.flow==='subscribe'&&r.employeeCode){
+      }else if(r.flow==='subscribe'){
         // Same equal rotation as every new onboarding case.
         const roster=await loadOnboardingRoster(tx);
         const target=roster.length?takeNextOnboarder(roster):await pickOnboarder();
