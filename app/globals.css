@@ -54,3 +54,7 @@
 .csv-btn:hover{border-color:var(--navy)}
 .case-controls{margin-top:10px}
 .case-controls select{flex:1;min-width:0}
+.sort-picker{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:2;min-width:0}
+.sort-picker select{flex:1;min-width:140px}
+.sort-picker .sort-dir{border:1px solid var(--border);background:#f8fafc;color:var(--navy);border-radius:7px;padding:10px 11px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.sort-picker .sort-dir:hover{border-color:var(--navy)}
