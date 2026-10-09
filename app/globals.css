@@ -58,3 +58,5 @@
 .sort-picker select{flex:1;min-width:140px}
 .sort-picker .sort-dir{border:1px solid var(--border);background:#f8fafc;color:var(--navy);border-radius:7px;padding:10px 11px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .sort-picker .sort-dir:hover{border-color:var(--navy)}
+
+.summary-grid>.sub-strip{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;background:none;border:0;padding:0}.sub-strip>div{background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:12px;min-width:0}.sub-strip b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sub-strip small{display:block;color:var(--muted);font-size:11px;margin-top:3px}@media(max-width:760px){.summary-grid>.sub-strip{grid-template-columns:1fr 1fr}}
