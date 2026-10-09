@@ -18,6 +18,11 @@
  *   cancelled_at
  *   current_wallet_balance
  *   last_completed_stage
+ *   expected_renewal_due_date  (subscription expiry)
+ *   plan name                  (header plan_name / plan / subscription_plan / plan_type;
+ *                               if none of these exists, column CJ is used)
+ *   plan amount                (header plan_amount / subscription_amount / amount; optional,
+ *                               otherwise the portal uses the Silver / Gold / Platinum price)
  *
  * Ads Live verification (done by the portal on every sync):
  *   A case an onboarder marked Ads Live on or before the cutoff date is checked here.
@@ -161,8 +166,14 @@ function syncSubRawOnboarding_(dryRun) {
     subscriptionStatus: headers.indexOf('subscription_status'),
     cancelledAt: headers.indexOf('cancelled_at'),
     credits: headers.indexOf('current_wallet_balance'),
-    lastCompletedStage: headers.indexOf('last_completed_stage')
+    lastCompletedStage: headers.indexOf('last_completed_stage'),
+    expiryDate: headers.indexOf('expected_renewal_due_date'),
+    planName: firstHeader_(headers, ['plan_name', 'plan', 'subscription_plan', 'plan_type', 'sub_plan']),
+    planAmount: firstHeader_(headers, ['plan_amount', 'subscription_amount', 'plan_price', 'amount'])
   };
+
+  // Plan name sits in column CJ (index 87) when its header is not one of the names above.
+  if (optionalIdx.planName < 0 && headers.length > 87) optionalIdx.planName = 87;
 
 
   Object.keys(idx).forEach(function(key) {
@@ -333,6 +344,11 @@ function syncSubRawOnboarding_(dryRun) {
       deduped[customerId].cancelledAt = optionalIdx.cancelledAt >= 0 ? normalizeSheetDate_(row[optionalIdx.cancelledAt]) || '' : '';
       deduped[customerId].credits = optionalIdx.credits >= 0 ? String(row[optionalIdx.credits] == null ? '' : row[optionalIdx.credits]).trim() : '';
       deduped[customerId].lastCompletedStage = optionalIdx.lastCompletedStage >= 0 ? String(row[optionalIdx.lastCompletedStage] == null ? '' : row[optionalIdx.lastCompletedStage]).trim() : '';
+      if (optionalIdx.expiryDate >= 0) deduped[customerId].expiryDate = normalizeSheetDate_(row[optionalIdx.expiryDate]) || '';
+      if (optionalIdx.planName >= 0) {
+        deduped[customerId].planName = String(row[optionalIdx.planName] == null ? '' : row[optionalIdx.planName]).trim();
+        deduped[customerId].planAmount = optionalIdx.planAmount >= 0 ? String(row[optionalIdx.planAmount] == null ? '' : row[optionalIdx.planAmount]).trim() : '';
+      }
     }
   }
 
@@ -587,6 +603,14 @@ function mergeSummary_(target, source) {
  * Converts a sheet cell to a number.
  * Blank or non-numeric cells become 0.
  */
+function firstHeader_(headers, names) {
+  for (let i = 0; i < names.length; i++) {
+    const at = headers.indexOf(names[i]);
+    if (at >= 0) return at;
+  }
+  return -1;
+}
+
 function toSheetNumber_(value) {
 
   if (value === '' || value == null) {

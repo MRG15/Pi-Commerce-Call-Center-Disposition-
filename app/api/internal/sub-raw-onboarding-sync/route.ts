@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { loadOnboardingRoster,takeNextOnboarder } from '@/lib/onboarding';
+import { PLANS } from '@/lib/plans';
 
 type SourceRow = {
   customerId?: unknown;
@@ -16,6 +17,9 @@ type SourceRow = {
   cancelledAt?: unknown;
   credits?: unknown;
   lastCompletedStage?: unknown;
+  planName?: unknown;
+  planAmount?: unknown;
+  expiryDate?: unknown;
 };
 
 type NormalizedRow = {
@@ -36,6 +40,12 @@ type NormalizedRow = {
   cancelledAt: string|null;
   credits: number|null;
   lastCompletedStage: string|null;
+  // Plan and expiry columns are newer; cases keep their values when an older script omits them.
+  planKnown: boolean;
+  expiryKnown: boolean;
+  planName: string|null;
+  planAmount: number|null;
+  expiryDate: string|null;
 };
 
 // An onboarder-marked Ads Live case is checked against Sub Raw once it is at least a day old:
@@ -71,6 +81,16 @@ function isIsoDate(value:string){
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+// Plan amount from the sheet's amount column when sent, otherwise from the plan name
+// (Silver / Gold / Platinum list prices). Unknown plans stay blank rather than guessed.
+function planAmountOf(amount:unknown,name:unknown):number|null{
+  const t=String(amount??'').replace(/[^0-9.]/g,'');
+  if(t&&Number(t)>0) return Number(t);
+  const n=String(name??'').toLowerCase();
+  for(const p of Object.values(PLANS)) if(n.includes(p.label.toLowerCase())) return p.price;
+  return null;
+}
+
 function normalizeRow(raw:SourceRow):NormalizedRow|null{
   const customerId=String(raw.customerId??'').trim();
   const subFirstDate=String(raw.subFirstDate??'').trim();
@@ -96,6 +116,11 @@ function normalizeRow(raw:SourceRow):NormalizedRow|null{
     cancelledAt:isIsoDate(String(raw.cancelledAt??'').trim())?String(raw.cancelledAt).trim():null,
     credits:raw.credits===undefined||raw.credits===''||raw.credits===null?null:sheetNumber(String(raw.credits).replace(/[^0-9.\-]/g,'')),
     lastCompletedStage:String(raw.lastCompletedStage??'').trim()||null,
+    planKnown:raw.planName!==undefined,
+    expiryKnown:raw.expiryDate!==undefined,
+    planName:String(raw.planName??'').trim()||null,
+    planAmount:planAmountOf(raw.planAmount,raw.planName),
+    expiryDate:isIsoDate(String(raw.expiryDate??'').trim())?String(raw.expiryDate).trim():null,
   };
 }
 
@@ -412,12 +437,14 @@ export async function POST(req:Request){
 
   // Sub Raw fields on every matching case (pills, sorting, stage filter on the onboarding screen).
   const subFields=[...deduped.values()].filter(r=>r.subFieldsKnown).map(r=>({customer_id:r.customerId,status:r.subscriptionStatus,
-    cancelled_at:r.cancelledAt,credits:r.credits,stage:r.lastCompletedStage}));
+    cancelled_at:r.cancelledAt,credits:r.credits,stage:r.lastCompletedStage,plan_known:r.planKnown,plan:r.planName,amount:r.planAmount,expiry_known:r.expiryKnown,expiry:r.expiryDate}));
   if(!dryRun&&subFields.length){
     await sql`
       UPDATE onboarding_cases c SET sub_status=x.status,sub_cancelled_at=x.cancelled_at::date,sub_credits=x.credits,
-        last_completed_stage=x.stage,sub_synced_at=now()
-      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text)
+        last_completed_stage=x.stage,sub_plan_name=CASE WHEN x.plan_known THEN x.plan ELSE c.sub_plan_name END,
+        sub_plan_amount=CASE WHEN x.plan_known THEN x.amount ELSE c.sub_plan_amount END,
+        sub_expiry_date=CASE WHEN x.expiry_known THEN x.expiry::date ELSE c.sub_expiry_date END,sub_synced_at=now()
+      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text,plan_known boolean,plan text,amount numeric,expiry_known boolean,expiry text)
       WHERE c.customer_id=x.customer_id
     `;
   }
