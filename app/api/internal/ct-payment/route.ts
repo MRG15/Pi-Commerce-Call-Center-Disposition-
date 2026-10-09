@@ -77,9 +77,17 @@ function normalize(item:any){
 export async function POST(req:Request){
   const configured=process.env.CT_WEBHOOK_SECRET||'';
   const supplied=req.headers.get('x-ct-webhook-secret')||'';
-  if(!configured||!supplied||!sameSecret(configured,supplied)) return NextResponse.json({error:'Unauthorized'},{status:401});
-  const body:any=await req.json().catch(()=>null);
-  if(!body) return NextResponse.json({error:'Invalid JSON'},{status:400});
+  const text=await req.text().catch(()=>'');
+  // Refused calls are recorded (never the secret) so a CT setup problem shows up in the data.
+  const reject=async(reason:string,status:number,error:string)=>{
+    await db()`INSERT INTO ct_webhook_rejects(reason,body_excerpt) VALUES(${reason},${text.slice(0,2000)})`.catch(()=>{});
+    return NextResponse.json({error},{status});
+  };
+  if(!configured||!supplied) return reject('missing_secret',401,'Unauthorized');
+  if(!sameSecret(configured,supplied)) return reject('wrong_secret',401,'Unauthorized');
+  let body:any=null;
+  try{body=JSON.parse(text);}catch{}
+  if(!body) return reject('invalid_json',400,'Invalid JSON');
   const items:any[]=Array.isArray(body)?body:Array.isArray(body.profiles)?body.profiles:Array.isArray(body.events)?body.events:[body];
   const rows=items.map(normalize).filter(Boolean) as NonNullable<ReturnType<typeof normalize>>[];
   const sql=db();
