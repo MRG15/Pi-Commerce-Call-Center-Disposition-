@@ -45,8 +45,8 @@ export async function POST(req:Request){
   const sql=db(); const latest=state.latest;
   const disposition=[latest.l0_label_snapshot,latest.l1_label_snapshot,latest.l2_label_snapshot].filter(Boolean).join(' → ');
   const rows=await sql`
-    INSERT INTO onboarding_cases(customer_id,source_type,source_seller_call_id,source_seller_agent_id,source_seller_disposition,sale_date,assigned_to,assigned_at,created_by,last_activity_at)
-    VALUES(${customerId},'seller_handoff',${latest.id}::uuid,${latest.agent_id}::uuid,${disposition},${latest.call_date},${assignee.id}::uuid,now(),${user.id}::uuid,now())
+    INSERT INTO onboarding_cases(customer_id,source_type,source_seller_call_id,source_seller_agent_id,source_seller_disposition,sale_date,assigned_to,assigned_at,created_by,last_activity_at,rotation_agent_id)
+    VALUES(${customerId},'seller_handoff',${latest.id}::uuid,${latest.agent_id}::uuid,${disposition},${latest.call_date},${assignee.id}::uuid,now(),${user.id}::uuid,now(),${assignee.id}::uuid)
     RETURNING id
   `;
   const caseId=rows[0].id;

@@ -124,8 +124,8 @@ export async function POST(req:Request){
           const saleDate=istDay(r.at);
           await tx`INSERT INTO customers(customer_id) VALUES(${r.customerId}) ON CONFLICT (customer_id) DO NOTHING`;
           const c=await tx`
-            INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at,sold_by_employee_code,created_by_ct)
-            VALUES(${r.customerId},'historical_import',${saleDate}::date,${target.id}::uuid,now(),NULL,${r.employeeCode},TRUE)
+            INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at,sold_by_employee_code,created_by_ct,rotation_agent_id)
+            VALUES(${r.customerId},'historical_import',${saleDate}::date,${target.id}::uuid,now(),NULL,${r.employeeCode},TRUE,${target.id}::uuid)
             RETURNING id
           `;
           await tx`

@@ -108,8 +108,8 @@ export async function POST(req:Request){
     if(saleDate>todayIst) return NextResponse.json({error:'Date of Sale cannot be in the future.'},{status:400});
   }
   const rows=await sql`
-    INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,created_by,last_activity_at)
-    VALUES(${customerId},'manual_admin',${saleDate}::date,${assignee.id}::uuid,now(),${user.id}::uuid,now())
+    INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,created_by,last_activity_at,rotation_agent_id)
+    VALUES(${customerId},'manual_admin',${saleDate}::date,${assignee.id}::uuid,now(),${user.id}::uuid,now(),${body.assignedTo?null:assignee.id})
     RETURNING id
   `;
   const caseId=rows[0].id;
