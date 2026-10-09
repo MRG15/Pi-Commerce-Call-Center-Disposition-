@@ -19,7 +19,7 @@ export async function GET(req:Request){
   const cases=await sql`
     SELECT c.id,c.customer_id,c.source_type,c.sale_date,c.assigned_to,c.assigned_at,c.current_l0,c.current_l1,c.current_l2,
       c.current_status,c.next_callback_at,c.last_activity_at,c.ads_live_at,c.closed_at,c.created_at,c.updated_at,c.language_barrier_at,
-      c.sub_status,c.sub_cancelled_at::text AS sub_cancelled_at,c.sub_credits::float8 AS sub_credits,c.last_completed_stage,c.reopened_at,c.reopen_reason,
+      c.sub_status,c.sub_cancelled_at::text AS sub_cancelled_at,c.sub_credits::float8 AS sub_credits,c.sub_plan_name,c.sub_plan_amount::float8 AS sub_plan_amount,c.sub_expiry_date,c.last_completed_stage,c.reopened_at,c.reopen_reason,
       (SELECT so.rank FROM onboarding_stage_order so WHERE so.stage=c.last_completed_stage) AS stage_rank,
       a.name AS assigned_name,
       m.merchant_name,m.phone_number,m.category,m.sub_category,
