@@ -82,14 +82,13 @@ function isIsoDate(value:string){
 }
 
 // Plan amount from the sheet's amount column when sent, otherwise from the plan name
-// (Silver / Gold / Platinum list prices, or a ₹ figure in the name such as "₹499 Plan"). Unknown plans stay blank rather than guessed.
+// (Silver / Gold / Platinum list prices). Unknown plans stay blank rather than guessed.
 function planAmountOf(amount:unknown,name:unknown):number|null{
   const t=String(amount??'').replace(/[^0-9.]/g,'');
   if(t&&Number(t)>0) return Number(t);
   const n=String(name??'').toLowerCase();
   for(const p of Object.values(PLANS)) if(n.includes(p.label.toLowerCase())) return p.price;
-  const inName=n.match(/₹\s*([0-9][0-9,]*)/);
-  return inName?Number(inName[1].replace(/,/g,'')):null;
+  return null;
 }
 
 function normalizeRow(raw:SourceRow):NormalizedRow|null{
