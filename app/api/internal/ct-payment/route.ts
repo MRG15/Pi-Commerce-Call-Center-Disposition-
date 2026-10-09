@@ -15,7 +15,9 @@ import { loadOnboardingRoster,pickOnboarder,takeNextOnboarder } from '@/lib/onbo
 //   - other flows (upgrade) -> only the event is stored
 // Every event is also kept in ct_payment_events. Accepts CT's webhook body
 // ({profiles:[{identity, key_values, event_properties, ...}]}), a single flat event, or an array.
-// Field names: customer_id (or the profile identity), flow / event_label, plan / event_label2,
+// Merchant: customer_id (Cust ID) and/or mid (CT's profile identity is the MID; a MID alone is
+// mapped to the Cust ID when the portal knows it, otherwise stored as unmatched_mid).
+// Field names: flow / event_label, plan / event_label2,
 // amount / event_label3, employee_code / event_label4, event_time (optional). Values sent as
 // "flow=subscribe" are read as "subscribe".
 
@@ -54,16 +56,20 @@ function istDay(d:Date){
 
 function normalize(item:any){
   const srcs=[item?.key_values,item?.event_properties,item?.eventProperties,item?.evtData,item?.profileData,item];
-  const customerId=val(pick(srcs,['customer_id','cust_id','custId','customerId','merchant_cust_id','identity']));
-  if(!customerId||!/^\d+$/.test(customerId)) return null;
+  // CT's profile identity is the MID; the Cust ID comes as its own field when CT sends it.
+  const identity=val(pick(srcs,['identity']));
+  const custRaw=val(pick(srcs,['customer_id','cust_id','custId','customerId','merchant_cust_id']))||(identity&&/^\d+$/.test(identity)?identity:null);
+  const customerId=custRaw&&/^\d+$/.test(custRaw)?custRaw:null;
+  const mid=val(pick(srcs,['mid','merchant_id','merchantId','MID']))||(identity&&!/^\d+$/.test(identity)?identity:null);
+  if(!customerId&&!mid) return null;
   const amountRaw=val(pick(srcs,['amount','event_label3']));
   const amount=amountRaw&&Number.isFinite(Number(amountRaw.replace(/[^0-9.]/g,'')))&&amountRaw.replace(/[^0-9.]/g,'')!==''?Number(amountRaw.replace(/[^0-9.]/g,'')):null;
   const flow=val(pick(srcs,['flow','event_label']))?.toLowerCase()||null;
   const plan=val(pick(srcs,['plan','event_label2']))?.toLowerCase()||null;
   const employeeCode=val(pick(srcs,['employee_code','employeeCode','event_label4']));
   const at=eventTime(pick(srcs,['event_time','eventTime','ts','timestamp']))||new Date();
-  return {customerId,flow,plan,amount,employeeCode,at,
-    dedupeKey:[customerId,flow||'',plan||'',amount??'',istDay(at)].join('|'),raw:item};
+  return {customerId,mid,flow,plan,amount,employeeCode,at,
+    dedupeKey:[customerId||`mid:${mid}`,flow||'',plan||'',amount??'',istDay(at)].join('|'),raw:item};
 }
 
 export async function POST(req:Request){
@@ -77,16 +83,31 @@ export async function POST(req:Request){
   const sql=db();
   let stored=0,created=0;
   for(const r of rows){
+    // Only a MID: use the Cust ID the portal already knows for it (AdsRun Raw, earlier CT events).
+    if(!r.customerId&&r.mid){
+      const known=await sql`
+        SELECT customer_id FROM merchant_ads WHERE mid=${r.mid} AND customer_id IS NOT NULL
+        UNION ALL
+        SELECT customer_id FROM ct_payment_events WHERE mid=${r.mid} AND customer_id IS NOT NULL
+        LIMIT 1
+      `;
+      r.customerId=known[0]?.customer_id||null;
+    }
     await sql.begin(async(tx:any)=>{
-      await tx`SELECT pg_advisory_xact_lock(hashtext(${r.customerId}))`;
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${r.customerId||`mid:${r.mid}`}))`;
       const ins=await tx`
-        INSERT INTO ct_payment_events(customer_id,flow,plan,amount,employee_code,event_at,dedupe_key,raw)
-        VALUES(${r.customerId},${r.flow},${r.plan},${r.amount},${r.employeeCode},${r.at},${r.dedupeKey},${sql.json(r.raw)})
+        INSERT INTO ct_payment_events(customer_id,mid,flow,plan,amount,employee_code,event_at,dedupe_key,raw)
+        VALUES(${r.customerId},${r.mid},${r.flow},${r.plan},${r.amount},${r.employeeCode},${r.at},${r.dedupeKey},${sql.json(r.raw)})
         ON CONFLICT (dedupe_key) DO NOTHING
         RETURNING id
       `;
       if(!ins[0]) return; // CT retry: already handled
       stored++;
+      if(!r.customerId){
+        // MID the portal cannot map yet: kept for review; the next day's sync opens the case.
+        await tx`UPDATE ct_payment_events SET case_action='unmatched_mid' WHERE id=${ins[0].id}`;
+        return;
+      }
       const existing=await tx`SELECT id,sold_by_employee_code FROM onboarding_cases WHERE customer_id=${r.customerId} ORDER BY created_at LIMIT 1 FOR UPDATE`;
       let action='ignored';
       if(existing[0]){
@@ -125,7 +146,7 @@ export async function GET(){
   if(!user?.isSuperAdmin&&user?.role!=='admin') return NextResponse.json({error:'Admin only'},{status:403});
   const sql=db();
   const rows=await sql`
-    SELECT customer_id,flow,plan,amount::float8 AS amount,employee_code,case_action,event_at,received_at
+    SELECT customer_id,mid,flow,plan,amount::float8 AS amount,employee_code,case_action,event_at,received_at
     FROM ct_payment_events ORDER BY received_at DESC LIMIT 100
   `;
   return NextResponse.json({events:rows});
