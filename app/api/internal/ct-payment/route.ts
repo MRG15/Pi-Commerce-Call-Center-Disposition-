@@ -29,6 +29,8 @@ function sameSecret(a:string,b:string){
 function val(v:unknown){
   let s=String(v??'').trim();
   if(/^[a-z_ ]+=/i.test(s)) s=s.slice(s.indexOf('=')+1).trim();
+  // CT's liquid fallback (| default: "1") stands for a missing value, never a real one.
+  if(s==='1') return null;
   return s||null;
 }
 
@@ -59,7 +61,7 @@ function normalize(item:any){
   // CT's profile identity is the MID; the Cust ID comes as its own field when CT sends it.
   const identity=val(pick(srcs,['identity']));
   const custRaw=val(pick(srcs,['customer_id','cust_id','custId','customerId','merchant_cust_id']))||(identity&&/^\d+$/.test(identity)?identity:null);
-  const customerId=custRaw&&/^\d+$/.test(custRaw)?custRaw:null;
+  const customerId=custRaw&&/^\d{5,}$/.test(custRaw)?custRaw:null; // real Cust IDs are 8+ digits
   const mid=val(pick(srcs,['mid','merchant_id','merchantId','MID']))||(identity&&!/^\d+$/.test(identity)?identity:null);
   if(!customerId&&!mid) return null;
   const amountRaw=val(pick(srcs,['amount','event_label3']));
