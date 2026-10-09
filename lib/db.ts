@@ -11,6 +11,10 @@ export function db() {
       max: 5,
       idle_timeout: 20,
       connect_timeout: 20,
+      // No server-side prepared statements: a cached plan breaks with "cached plan must not
+      // change result type" when a migration adds columns while connections are open, and
+      // Neon's pooled connections don't keep them across transactions anyway.
+      prepare: false,
     });
   }
   return client;
