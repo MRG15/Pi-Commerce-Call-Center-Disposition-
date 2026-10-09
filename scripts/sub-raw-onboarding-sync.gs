@@ -12,10 +12,17 @@
  *   total_adinsight_spend    (used to verify cases marked Ads Live)
  *   latest_ad_status         (used to verify cases marked Ads Live)
  *
+ * Optional headers (shown on each onboarding case: subscription pills, credits / subscribed
+ * date / stage sorting and the stage filter; skipped if the column is missing):
+ *   subscription_status
+ *   cancelled_at
+ *   current_wallet_balance
+ *   last_completed_stage
+ *
  * Ads Live verification (done by the portal on every sync):
  *   A case an onboarder marked Ads Live on or before the cutoff date is checked here.
  *   - 0 ads executed, 0 impressions, 0 spend  -> case is reopened ("Ads Live Not Verified")
- *   - 0 ads executed, but impressions or spend, latest status FAILED -> stays Ads Live, tagged "Ad Failed After Live"
+ *   - 0 ads executed, but impressions or spend, latest status FAILED -> case is reopened ("Ad Failed After Live")
  *   - anything else (including PAUSED) -> no change
  *
  * Required Script Properties:
@@ -147,6 +154,14 @@ function syncSubRawOnboarding_(dryRun) {
     totalImpressions: headers.indexOf('total_impressions'),
     totalSpend: headers.indexOf('total_adinsight_spend'),
     latestAdStatus: headers.indexOf('latest_ad_status')
+  };
+
+  // Optional columns: sent when present, skipped otherwise.
+  const optionalIdx = {
+    subscriptionStatus: headers.indexOf('subscription_status'),
+    cancelledAt: headers.indexOf('cancelled_at'),
+    credits: headers.indexOf('current_wallet_balance'),
+    lastCompletedStage: headers.indexOf('last_completed_stage')
   };
 
 
@@ -311,6 +326,14 @@ function syncSubRawOnboarding_(dryRun) {
       sourceRow: sourceRow
 
     };
+
+    if (optionalIdx.subscriptionStatus >= 0) {
+      const row = values[r];
+      deduped[customerId].subscriptionStatus = String(row[optionalIdx.subscriptionStatus] == null ? '' : row[optionalIdx.subscriptionStatus]).trim().toUpperCase();
+      deduped[customerId].cancelledAt = optionalIdx.cancelledAt >= 0 ? normalizeSheetDate_(row[optionalIdx.cancelledAt]) || '' : '';
+      deduped[customerId].credits = optionalIdx.credits >= 0 ? String(row[optionalIdx.credits] == null ? '' : row[optionalIdx.credits]).trim() : '';
+      deduped[customerId].lastCompletedStage = optionalIdx.lastCompletedStage >= 0 ? String(row[optionalIdx.lastCompletedStage] == null ? '' : row[optionalIdx.lastCompletedStage]).trim() : '';
+    }
   }
 
 
@@ -342,7 +365,7 @@ function syncSubRawOnboarding_(dryRun) {
 
     adsLiveReopened: 0,
 
-    adFailedAfterLiveFlagged: 0,
+    adFailedAfterLiveReopened: 0,
 
     existingOpenNoChange: 0,
 
@@ -525,7 +548,7 @@ function mergeSummary_(target, source) {
 
     'adsLiveReopened',
 
-    'adFailedAfterLiveFlagged',
+    'adFailedAfterLiveReopened',
 
     'existingOpenNoChange',
 
@@ -743,7 +766,7 @@ function writeSyncLog_(ss, data) {
 
       'Ads Live Reopened',
 
-      'Ad Failed After Live'
+      'Ad Failed Reopened'
 
     ]);
 
@@ -759,7 +782,7 @@ function writeSyncLog_(ss, data) {
   if (sheet.getRange(1, 16).getValue() === '') {
 
     sheet.getRange(1, 16, 1, 2).setValues([
-      ['Ads Live Reopened', 'Ad Failed After Live']
+      ['Ads Live Reopened', 'Ad Failed Reopened']
     ]);
 
   }
@@ -816,7 +839,7 @@ function writeSyncLog_(ss, data) {
 
     t.adsLiveReopened || 0,
 
-    t.adFailedAfterLiveFlagged || 0
+    t.adFailedAfterLiveReopened || 0
 
   ]);
 }

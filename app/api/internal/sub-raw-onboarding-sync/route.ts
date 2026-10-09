@@ -12,6 +12,10 @@ type SourceRow = {
   totalImpressions?: unknown;
   totalSpend?: unknown;
   latestAdStatus?: unknown;
+  subscriptionStatus?: unknown;
+  cancelledAt?: unknown;
+  credits?: unknown;
+  lastCompletedStage?: unknown;
 };
 
 type NormalizedRow = {
@@ -25,13 +29,22 @@ type NormalizedRow = {
   totalImpressions: number;
   totalSpend: number;
   latestAdStatus: string;
+  // Sub Raw fields shown on the onboarding case (pills, sorting, stage filter). Only written
+  // when the script sent them (older script versions do not).
+  subFieldsKnown: boolean;
+  subscriptionStatus: string|null;
+  cancelledAt: string|null;
+  credits: number|null;
+  lastCompletedStage: string|null;
 };
 
 // An onboarder-marked Ads Live case is checked against Sub Raw once it is at least a day old:
-//   REOPEN      – no ad has ever run (0 ads executed, 0 impressions, 0 spend)
-//   FLAG_FAILED – the ad did run (impressions or spend) but its latest status is FAILED
-//   OK          – anything else, including PAUSED and rows without delivery fields
-type LiveCheck='OK'|'REOPEN'|'FLAG_FAILED';
+//   REOPEN        – no ad has ever run (0 ads executed, 0 impressions, 0 spend)
+//   REOPEN_FAILED – the ad did run (impressions or spend) but its latest status is FAILED
+//   OK            – anything else, including PAUSED and rows without delivery fields
+// Both reopen cases go back to Open, flagged so onboarders can filter them and so the CSM
+// queues leave them out until the first ad is properly live.
+type LiveCheck='OK'|'REOPEN'|'REOPEN_FAILED';
 
 function sheetNumber(value:unknown):number|null{
   const t=String(value??'').replace(/,/g,'').trim();
@@ -45,7 +58,7 @@ function checkOnboarderLive(c:any,row:NormalizedRow,cutoffDate:string):LiveCheck
   if(!c.ads_live_day || c.ads_live_day>cutoffDate) return 'OK';
   if(!row.deliveryKnown || row.totalAdsExecuted>0) return 'OK';
   if(row.totalImpressions===0 && row.totalSpend===0) return 'REOPEN';
-  if(row.latestAdStatus==='FAILED' && !c.failed_flagged) return 'FLAG_FAILED';
+  if(row.latestAdStatus==='FAILED') return 'REOPEN_FAILED';
   return 'OK';
 }
 
@@ -78,6 +91,11 @@ function normalizeRow(raw:SourceRow):NormalizedRow|null{
     totalImpressions:impressions??0,
     totalSpend:spend??0,
     latestAdStatus:String(raw.latestAdStatus??'').trim().toUpperCase(),
+    subFieldsKnown:raw.subscriptionStatus!==undefined,
+    subscriptionStatus:String(raw.subscriptionStatus??'').trim().toUpperCase()||null,
+    cancelledAt:isIsoDate(String(raw.cancelledAt??'').trim())?String(raw.cancelledAt).trim():null,
+    credits:raw.credits===undefined||raw.credits===''||raw.credits===null?null:sheetNumber(String(raw.credits).replace(/[^0-9.\-]/g,'')),
+    lastCompletedStage:String(raw.lastCompletedStage??'').trim()||null,
   };
 }
 
@@ -137,7 +155,7 @@ export async function POST(req:Request){
     existingMarkedExternalLive:0,
     alreadyAdsLive:0,
     adsLiveReopened:0,
-    adFailedAfterLiveFlagged:0,
+    adFailedAfterLiveReopened:0,
     existingOpenNoChange:0,
     lostNoChange:0,
     lostMarkedExternalLive:0,
@@ -160,8 +178,7 @@ export async function POST(req:Request){
       const existing=await sql`
         SELECT c.id,c.current_status,c.ads_live_at,
           (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date::text AS ads_live_day,
-          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_EXTERNAL_ADS_LIVE') AS has_external,
-          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_AD_FAILED_AFTER_LIVE') AS failed_flagged
+          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_EXTERNAL_ADS_LIVE') AS has_external
         FROM onboarding_cases c
         WHERE c.customer_id=${row.customerId}
         ORDER BY c.created_at ASC
@@ -182,9 +199,9 @@ export async function POST(req:Request){
         if(check==='REOPEN'){
           summary.adsLiveReopened++;
           summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
-        }else if(check==='FLAG_FAILED'){
-          summary.adFailedAfterLiveFlagged++;
-          summary.actions.push({customerId:row.customerId,action:'FLAG_AD_FAILED_AFTER_LIVE'});
+        }else if(check==='REOPEN_FAILED'){
+          summary.adFailedAfterLiveReopened++;
+          summary.actions.push({customerId:row.customerId,action:'REOPEN_AD_FAILED_AFTER_LIVE'});
         }else{
           summary.alreadyAdsLive++;
         }
@@ -209,8 +226,7 @@ export async function POST(req:Request){
       const existing=await tx`
         SELECT c.id,c.current_status,c.ads_live_at,c.assigned_to,
           (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date::text AS ads_live_day,
-          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_EXTERNAL_ADS_LIVE') AS has_external,
-          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_AD_FAILED_AFTER_LIVE') AS failed_flagged
+          EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_EXTERNAL_ADS_LIVE') AS has_external
         FROM onboarding_cases c
         WHERE c.customer_id=${row.customerId}
         ORDER BY c.created_at ASC
@@ -288,32 +304,10 @@ export async function POST(req:Request){
           WHERE onboarding_case_id=${c.id}::uuid
         `;
         const checkAttempt=Number(checkAttemptRows[0]?.n||1);
-        if(check==='REOPEN'){
-          // Marked Ads Live by an onboarder, but Sub Raw shows no ad has ever run. Keep the
-          // onboarder's Ads Live entry in the history and put the case back in the open queue;
-          // clearing ads_live_at takes it out of the Ads Live counts, rate and incentives.
-          await tx`
-            INSERT INTO onboarding_events(
-              onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,source_row,
-              l0_code,l0_label_snapshot,remark
-            )
-            VALUES(
-              ${c.id}::uuid,${row.customerId},${checkAttempt},'system','Sub Raw',${row.sourceRow},
-              'SYSTEM_ADS_LIVE_NOT_VERIFIED','Ads Live Not Verified',
-              ${`Marked Ads Live on ${c.ads_live_day}, but Sub Raw shows no ad has run (0 ads executed, 0 impressions, 0 spend) as of ${cutoffDate}. Case reopened by the T-1 sync.`}
-            )
-          `;
-          await tx`
-            UPDATE onboarding_cases
-            SET current_l0='Ads Live Not Verified',current_l1=NULL,current_l2=NULL,current_status='open',
-                ads_live_at=NULL,closed_at=NULL,next_callback_at=now(),last_activity_at=now(),updated_at=now()
-            WHERE id=${c.id}::uuid
-          `;
-          summary.adsLiveReopened++;
-          summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
-          return;
-        }
-        // The ad did run and then failed: the case stays Ads Live, tagged once so it can be followed up.
+        // Marked Ads Live by an onboarder, but Sub Raw shows no ad has run, or the ad ran and then
+        // failed. Keep the onboarder's Ads Live entry in the history and put the case back in the
+        // open queue; clearing ads_live_at takes it out of the Ads Live counts, rate and incentives.
+        const failed=check==='REOPEN_FAILED';
         await tx`
           INSERT INTO onboarding_events(
             onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,source_row,
@@ -321,17 +315,26 @@ export async function POST(req:Request){
           )
           VALUES(
             ${c.id}::uuid,${row.customerId},${checkAttempt},'system','Sub Raw',${row.sourceRow},
-            'SYSTEM_AD_FAILED_AFTER_LIVE','Ad Failed After Live',
-            ${`Ad ran (${row.totalImpressions} impressions, Rs ${row.totalSpend} spent) and its latest status is FAILED as of ${cutoffDate}. Ads Live retained.`}
+            ${failed?'SYSTEM_AD_FAILED_AFTER_LIVE':'SYSTEM_ADS_LIVE_NOT_VERIFIED'},${failed?'Ad Failed After Live':'Ads Live Not Verified'},
+            ${failed
+              ?`Marked Ads Live on ${c.ads_live_day}; the ad ran (${row.totalImpressions} impressions, Rs ${row.totalSpend} spent) but its latest status is FAILED as of ${cutoffDate}. Case reopened by the T-1 sync.`
+              :`Marked Ads Live on ${c.ads_live_day}, but Sub Raw shows no ad has run (0 ads executed, 0 impressions, 0 spend) as of ${cutoffDate}. Case reopened by the T-1 sync.`}
           )
         `;
         await tx`
           UPDATE onboarding_cases
-          SET current_l1='Ad Failed After Live',updated_at=now()
+          SET current_l0=${failed?'Ad Failed After Live':'Ads Live Not Verified'},current_l1=NULL,current_l2=NULL,current_status='open',
+              ads_live_at=NULL,closed_at=NULL,next_callback_at=now(),last_activity_at=now(),updated_at=now(),
+              reopened_at=now(),reopen_reason=${failed?'ad_failed':'no_ad_ran'}
           WHERE id=${c.id}::uuid
         `;
-        summary.adFailedAfterLiveFlagged++;
-        summary.actions.push({customerId:row.customerId,action:'FLAG_AD_FAILED_AFTER_LIVE'});
+        if(failed){
+          summary.adFailedAfterLiveReopened++;
+          summary.actions.push({customerId:row.customerId,action:'REOPEN_AD_FAILED_AFTER_LIVE'});
+        }else{
+          summary.adsLiveReopened++;
+          summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
+        }
         return;
       }
       if(c.current_status==='lost' && isLiveAsOfCutoff){
@@ -406,6 +409,19 @@ export async function POST(req:Request){
       summary.actions.push({customerId:row.customerId,action:'MARK_EXTERNAL_ADS_LIVE'});
     });
   }
+
+  // Sub Raw fields on every matching case (pills, sorting, stage filter on the onboarding screen).
+  const subFields=[...deduped.values()].filter(r=>r.subFieldsKnown).map(r=>({customer_id:r.customerId,status:r.subscriptionStatus,
+    cancelled_at:r.cancelledAt,credits:r.credits,stage:r.lastCompletedStage}));
+  if(!dryRun&&subFields.length){
+    await sql`
+      UPDATE onboarding_cases c SET sub_status=x.status,sub_cancelled_at=x.cancelled_at::date,sub_credits=x.credits,
+        last_completed_stage=x.stage,sub_synced_at=now()
+      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text)
+      WHERE c.customer_id=x.customer_id
+    `;
+  }
+  (summary as any).subFieldsUpdated=dryRun?0:subFields.length;
 
   return NextResponse.json({ok:true,dryRun,cutoffDate,...summary});
 }
