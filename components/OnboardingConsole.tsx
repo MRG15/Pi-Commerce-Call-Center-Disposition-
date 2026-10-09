@@ -25,7 +25,7 @@ const ONBOARDING_CSV:CsvColumn<any>[]=[
  ['Assigned to',c=>c.assigned_name],['Status',c=>c.current_status==='ads_live'?'Ads Live':c.current_status],['L0',c=>c.current_l0],['L1',c=>c.current_l1],['L2',c=>c.current_l2],
  ['Latest technical issue',c=>c.latest_tech_issue],['Open technical issue',c=>c.has_open_technical?'Yes':'No'],['Language barrier',c=>c.language_barrier_at?'Yes':'No'],
  ['Latest remark',c=>c.latest_remark],['Subscription',c=>c.sub_status?`${c.sub_status}${c.sub_cancelled_at?' (cancelled)':''}`:'Not in Sub Raw'],
- ['Cancelled on',c=>c.sub_cancelled_at],['Credits pending',c=>c.sub_credits],['Plan',c=>c.sub_plan_name],['Plan amount',c=>c.sub_plan_amount],['Subscription expiry',c=>c.sub_expiry_date?String(c.sub_expiry_date).slice(0,10):''],['Last completed stage',c=>c.last_completed_stage],['Reopened',c=>REOPEN_LABEL[c.reopen_reason]||''],['Date of sale',c=>c.sale_date?String(c.sale_date).slice(0,10):''],['Days since sale',c=>c.days_since_sale],
+ ['Cancelled on',c=>c.sub_cancelled_at],['Credits pending',c=>c.sub_credits],['Plan',c=>c.sub_plan_name],['Sold by (employee code)',c=>c.sold_by_employee_code],['Plan amount',c=>c.sub_plan_amount],['Subscription expiry',c=>c.sub_expiry_date?String(c.sub_expiry_date).slice(0,10):''],['Last completed stage',c=>c.last_completed_stage],['Reopened',c=>REOPEN_LABEL[c.reopen_reason]||''],['Date of sale',c=>c.sale_date?String(c.sale_date).slice(0,10):''],['Days since sale',c=>c.days_since_sale],
  ['Touches',c=>c.touches],['Last activity',c=>istTime(c.last_activity_at)],['Next callback',c=>istTime(c.next_callback_at)],
  ['Ads live at',c=>istTime(c.ads_live_at)],['Closed at',c=>istTime(c.closed_at)],['Source',c=>c.source_type],
 ];
