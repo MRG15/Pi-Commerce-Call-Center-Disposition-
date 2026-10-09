@@ -15,3 +15,9 @@ CREATE TABLE IF NOT EXISTS ct_payment_events (
 );
 CREATE INDEX IF NOT EXISTS ct_payment_events_customer_idx ON ct_payment_events(customer_id, received_at);
 CREATE INDEX IF NOT EXISTS ct_payment_events_employee_idx ON ct_payment_events(employee_code);
+
+-- Field sales reported by CT open their onboarding case straight away (instead of the next day's
+-- Sub Raw sync). The case keeps the employee code of whoever sold the subscription.
+ALTER TABLE onboarding_cases ADD COLUMN IF NOT EXISTS sold_by_employee_code TEXT;
+ALTER TABLE onboarding_cases ADD COLUMN IF NOT EXISTS created_by_ct BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ct_payment_events ADD COLUMN IF NOT EXISTS case_action TEXT; -- created / existing / ignored
