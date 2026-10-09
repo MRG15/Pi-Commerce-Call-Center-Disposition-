@@ -1,5 +1,5 @@
 'use client';
-import { useEffect,useMemo,useState } from 'react';
+import { useEffect,useMemo,useRef,useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLANS, plansRequiredOn, todayIst } from '@/lib/plans';
 import { downloadCsv, type CsvColumn } from '@/lib/csv';
@@ -52,8 +52,26 @@ export default function OnboardingConsole(){
    const r=await fetch('/api/onboarding/cases?'+qs.toString(),{cache:'no-store'});
    if(r.ok)setCases((await r.json()).cases||[]);
  }
+ // New cases (CleverTap, seller handoffs, other onboarders' updates) appear without a manual
+ // refresh: the current view is reloaded quietly every 30 seconds while the tab is open, and
+ // when the tab comes back into focus. The open case and filters stay as they are.
+ const viewRef=useRef({viewPeriod:'all',viewAgent:'',viewFrom:'',viewTo:''}); // last applied view
+ useEffect(()=>{
+   const refresh=()=>{
+     if(document.visibilityState!=='visible')return;
+     const v=viewRef.current;
+     if(v.viewPeriod==='today')loadCases({from:today,to:today,agent:v.viewAgent});
+     else if(v.viewPeriod==='yesterday')loadCases({from:yesterday,to:yesterday,agent:v.viewAgent});
+     else if(v.viewPeriod==='custom'&&v.viewFrom&&v.viewTo)loadCases({from:v.viewFrom,to:v.viewTo,agent:v.viewAgent});
+     else loadCases({agent:v.viewAgent});
+   };
+   const t=setInterval(refresh,30000);
+   document.addEventListener('visibilitychange',refresh);
+   return()=>{clearInterval(t);document.removeEventListener('visibilitychange',refresh);};
+ },[]);
  async function applyView(period=viewPeriod,agent=viewAgent,customFrom=viewFrom,customTo=viewTo){
    setViewLoading(true);setSelected(null);
+   viewRef.current={viewPeriod:period,viewAgent:agent,viewFrom:customFrom,viewTo:customTo};
    if(period==='today')await loadCases({from:today,to:today,agent});
    else if(period==='yesterday')await loadCases({from:yesterday,to:yesterday,agent});
    else if(period==='custom'&&customFrom&&customTo)await loadCases({from:customFrom,to:customTo,agent});
