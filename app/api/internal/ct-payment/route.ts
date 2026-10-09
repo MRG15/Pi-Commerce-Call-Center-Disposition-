@@ -69,8 +69,13 @@ function normalize(item:any){
   const flow=val(pick(srcs,['flow','event_label']))?.toLowerCase()||null;
   const plan=val(pick(srcs,['plan','event_label2']))?.toLowerCase()||null;
   const employeeCode=val(pick(srcs,['employee_code','employeeCode','event_label4']));
+  const category=val(pick(srcs,['category','event_category','payload_event_category']))?.toLowerCase()||null;
+  const action=val(pick(srcs,['action','event_action','payload_event_action']))?.toLowerCase()||null;
   const at=eventTime(pick(srcs,['event_time','eventTime','ts','timestamp']))||new Date();
-  return {customerId,mid,flow,plan,amount,employeeCode,at,
+  // Only a subscription payment can open a case or set who sold it; top-ups, upgrades and
+  // other payments are stored for the record. Category/action are checked when CT sends them.
+  const isSubscription=flow==='subscribe'&&(!category||category==='pic_subscription')&&(!action||action==='payment_success');
+  return {customerId,mid,flow,plan,amount,employeeCode,category,action,isSubscription,at,
     dedupeKey:[customerId||`mid:${mid}`,flow||'',plan||'',amount??'',istDay(at)].join('|'),raw:item};
 }
 
@@ -106,8 +111,8 @@ export async function POST(req:Request){
     await sql.begin(async(tx:any)=>{
       await tx`SELECT pg_advisory_xact_lock(hashtext(${r.customerId||`mid:${r.mid}`}))`;
       const ins=await tx`
-        INSERT INTO ct_payment_events(customer_id,mid,flow,plan,amount,employee_code,event_at,dedupe_key,raw)
-        VALUES(${r.customerId},${r.mid},${r.flow},${r.plan},${r.amount},${r.employeeCode},${r.at},${r.dedupeKey},${sql.json(r.raw)})
+        INSERT INTO ct_payment_events(customer_id,mid,flow,plan,amount,employee_code,category,action,event_at,dedupe_key,raw)
+        VALUES(${r.customerId},${r.mid},${r.flow},${r.plan},${r.amount},${r.employeeCode},${r.category},${r.action},${r.at},${r.dedupeKey},${sql.json(r.raw)})
         ON CONFLICT (dedupe_key) DO NOTHING
         RETURNING id
       `;
@@ -122,9 +127,10 @@ export async function POST(req:Request){
       let action='ignored';
       if(existing[0]){
         action='existing';
-        if(r.employeeCode&&!existing[0].sold_by_employee_code)
+        // Only the subscription sale sets who sold it; a later top-up never relabels the case.
+        if(r.isSubscription&&r.employeeCode&&!existing[0].sold_by_employee_code)
           await tx`UPDATE onboarding_cases SET sold_by_employee_code=${r.employeeCode},updated_at=now() WHERE id=${existing[0].id}::uuid`;
-      }else if(r.flow==='subscribe'){
+      }else if(r.isSubscription){
         // Same equal rotation as every new onboarding case.
         const roster=await loadOnboardingRoster(tx);
         const target=roster.length?takeNextOnboarder(roster):await pickOnboarder();
