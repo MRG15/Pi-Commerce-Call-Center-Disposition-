@@ -3,12 +3,14 @@ import { useEffect,useMemo,useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
 import { downloadCsv,type CsvColumn } from '@/lib/csv';
+import { multiSort,NO_SORT,type SortState } from '@/lib/sort';
+import SortPicker from '@/components/SortPicker';
 
 type Node={id:string;code:string;label:string;level:number;parent_id:string|null};
 type View='queues'|'callbacks'|'metrics'|'notes'|'allocation';
 type Tab='ending'|'ended'|'cx'|'closed'|'onb_lost'|'all';
 type CxSub=''|'cancelled'|'lapsed';
-type SortBy='default'|'impressions'|'spend'|'credits';
+type SortBy='impressions'|'spend'|'credits';
 type CallFilter=''|'never'|'not_connected'|'connected';
 // never = no CSM call yet; not_connected = called but never got through; connected = got through at least once.
 const callStateOf=(m:any):CallFilter=>!m.last_outreach?'never':m.last_connect?'connected':'not_connected';
@@ -35,14 +37,14 @@ const CSM_CSV:CsvColumn<any>[]=[
   ['Top-ups',m=>m.topups],['Top-up total',m=>m.topup_total],['Renewals',m=>m.renewals],['Pitch note',m=>m.pitch],
   ['Onboarded by',m=>m.onboarding_owner],['Onboarding lost reason',m=>m.lost_reason],['Lost on',m=>m.lost_at?String(m.lost_at).slice(0,10):''],
 ];
-const SORTS:[SortBy,string][]=[['default','Default order'],['impressions','Impressions'],['spend','Spend'],['credits','Credits']];
+const SORTS:[SortBy,string][]=[['impressions','Impressions'],['spend','Spend'],['credits','Credits']];
 const SOURCE_LABEL:any={customer_success_followup:'CSM',new_event:'Onboarding',historical_import:'Imported',assignment:'Assignment',system:'System'};
 
 export default function CsmConsole(){
   const router=useRouter();
   const [user,setUser]=useState<any>(null),[data,setData]=useState<any>(null),[nodes,setNodes]=useState<Node[]>([]);
   const [view,setView]=useState<View>('queues'),[tab,setTab]=useState<Tab>('ending'),[search,setSearch]=useState(''),[csmFilter,setCsmFilter]=useState('');
-  const [cxSub,setCxSub]=useState<CxSub>(''),[sortBy,setSortBy]=useState<SortBy>('default'),[callFilter,setCallFilter]=useState<CallFilter>('');
+  const [cxSub,setCxSub]=useState<CxSub>(''),[sortBy,setSortBy]=useState<SortState<SortBy>>({...NO_SORT}),[callFilter,setCallFilter]=useState<CallFilter>('');
   const [selected,setSelected]=useState<any>(null),[detailLoading,setDetailLoading]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true);
 
   async function loadMerchants(){
@@ -78,8 +80,8 @@ export default function CsmConsole(){
   const shown=useMemo(()=>{
     const q=search.trim().toLowerCase(),qd=q.replace(/\D/g,'');
     const rows=pool.filter(m=>(tab==='all'||tabOf(m)===tab)&&(tab!=='cx'||!cxSub||m.queue===cxSub)&&(!q||String(m.customer_id).includes(q)||String(m.merchant_name||'').toLowerCase().includes(q)||(qd.length>=4&&String(m.phone_number||'').replace(/\D/g,'').includes(qd))));
-    if(sortBy==='default')return rows;
-    return [...rows].sort((a,b)=>(Number(b[sortBy])||0)-(Number(a[sortBy])||0));
+    const num=(k:SortBy)=>(m:any)=>m[k]==null?null:Number(m[k]);
+    return multiSort(rows,[sortBy.by&&{value:num(sortBy.by as SortBy),dir:sortBy.dir},sortBy.by&&sortBy.by2&&{value:num(sortBy.by2 as SortBy),dir:sortBy.dir2}].filter(Boolean) as any);
   },[pool,tab,cxSub,search,sortBy]);
   const callbacks=useMemo(()=>pool.filter(m=>m.next_callback&&!m.closed).sort((a,b)=>new Date(a.next_callback).getTime()-new Date(b.next_callback).getTime()),[pool]);
   const dueCallbacks=callbacks.filter(m=>new Date(m.next_callback).getTime()<=new Date(todayIst()+'T23:59:59+05:30').getTime()).length;
@@ -107,9 +109,9 @@ export default function CsmConsole(){
           <div className="search-row padtop">
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search merchant, customer ID or phone"/>
             {view==='queues'&&<select className="csm-filter" value={callFilter} onChange={e=>setCallFilter(e.target.value as CallFilter)}><option value="">All call status</option><option value="never">Never called</option><option value="not_connected">Called, not connected</option><option value="connected">Connected</option></select>}
-            {view==='queues'&&<select className="csm-filter" value={sortBy} onChange={e=>setSortBy(e.target.value as SortBy)}>{SORTS.map(([k,l])=><option key={k} value={k}>{k==='default'?l:`Sort: ${l}`}</option>)}</select>}
             {admin&&<select className="csm-filter" value={csmFilter} onChange={e=>setCsmFilter(e.target.value)}><option value="">All CSMs</option>{(data?.csms||[]).map((c:any)=><option key={c.id} value={c.id}>{c.name}</option>)}<option value="none">Unassigned</option></select>}
           </div>
+          {view==='queues'&&<div className="search-row case-controls"><SortPicker options={SORTS} value={sortBy} onChange={setSortBy}/></div>}
         </section>}
         {(view==='queues'||view==='callbacks')&&<div className="onboarding-grid">
           <section className="card">
