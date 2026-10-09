@@ -31,9 +31,10 @@ export async function pickOnboarder(preferredId?:string|null){
   return rows[0]||null;
 }
 
-// New cases are shared equally among the onboarding roster: each goes to whoever has received
-// the fewest cases since the roster started (ties: longest since their last case). Existing
-// cases are never moved.
+// New cases are shared equally among the onboarding roster: each goes to whoever the rotation has
+// picked the fewest times since the roster started (ties: longest since their last pick). Counted
+// on rotation_agent_id, so cases an admin later moves still count for the person first picked.
+// Existing cases are never moved.
 export async function loadOnboardingRoster(sql:any):Promise<{id:string;name:string;count:number;last:number}[]>{
   const ok=await sql`SELECT to_regclass('public.onboarding_roster') IS NOT NULL AS ok`;
   if(!ok[0]?.ok) return [];
@@ -45,8 +46,8 @@ export async function loadOnboardingRoster(sql:any):Promise<{id:string;name:stri
       WHERE a.active=TRUE
     )
     SELECT r.id,r.name,
-      (SELECT count(*)::int FROM onboarding_cases c WHERE c.assigned_to=r.id AND c.created_at>=r.since) AS count,
-      (SELECT max(c.created_at) FROM onboarding_cases c WHERE c.assigned_to=r.id) AS last
+      (SELECT count(*)::int FROM onboarding_cases c WHERE c.rotation_agent_id=r.id AND c.created_at>=r.since) AS count,
+      (SELECT max(c.created_at) FROM onboarding_cases c WHERE c.rotation_agent_id=r.id) AS last
     FROM r ORDER BY r.name
   `;
   return rows.map((x:any)=>({id:String(x.id),name:x.name,count:Number(x.count),last:x.last?new Date(x.last).getTime():0}));

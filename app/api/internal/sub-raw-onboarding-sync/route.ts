@@ -293,10 +293,10 @@ export async function POST(req:Request){
           const target=takeNextOnboarder(roster);
           const created=await tx`
             INSERT INTO onboarding_cases(
-              customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at
+              customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at,rotation_agent_id
             )
             VALUES(
-              ${row.customerId},'historical_import',${row.subFirstDate}::date,${target.id}::uuid,now(),NULL
+              ${row.customerId},'historical_import',${row.subFirstDate}::date,${target.id}::uuid,now(),NULL,${target.id}::uuid
             )
             RETURNING id
           `;
