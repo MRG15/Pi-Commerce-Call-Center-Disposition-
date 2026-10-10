@@ -23,6 +23,8 @@
  *                               if none of these exists, column CJ is used)
  *   plan amount                (header plan_amount / subscription_amount / amount; optional,
  *                               otherwise the portal uses the Silver / Gold / Platinum price)
+ *   merchant MID               (header mid / merchant_mid / merchant_id; links CleverTap
+ *                               payments that arrived without a Cust ID to the right case)
  *
  * Ads Live verification (done by the portal on every sync):
  *   A case an onboarder marked Ads Live on or before the cutoff date is checked here.
@@ -169,7 +171,8 @@ function syncSubRawOnboarding_(dryRun) {
     lastCompletedStage: headers.indexOf('last_completed_stage'),
     expiryDate: headers.indexOf('expected_renewal_due_date'),
     planName: firstHeader_(headers, ['plan_name', 'plan', 'subscription_plan', 'plan_type', 'sub_plan']),
-    planAmount: firstHeader_(headers, ['plan_amount', 'subscription_amount', 'plan_price', 'amount'])
+    planAmount: firstHeader_(headers, ['plan_amount', 'subscription_amount', 'plan_price', 'amount']),
+    mid: firstHeader_(headers, ['mid', 'merchant_mid', 'merchant_id', 'mid_id'])
   };
 
   // Plan name sits in column CJ (index 87) when its header is not one of the names above.
@@ -337,6 +340,10 @@ function syncSubRawOnboarding_(dryRun) {
       sourceRow: sourceRow
 
     };
+
+    if (optionalIdx.mid >= 0) {
+      deduped[customerId].mid = String(values[r][optionalIdx.mid] == null ? '' : values[r][optionalIdx.mid]).trim();
+    }
 
     if (optionalIdx.subscriptionStatus >= 0) {
       const row = values[r];

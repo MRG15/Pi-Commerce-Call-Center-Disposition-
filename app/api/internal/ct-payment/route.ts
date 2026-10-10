@@ -145,7 +145,7 @@ export async function POST(req:Request){
           await tx`
             INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,l0_code,l0_label_snapshot,remark)
             VALUES(${c[0].id}::uuid,${r.customerId},1,'assignment','CleverTap','SYSTEM_ASSIGNED','Assigned',
-              ${`Assigned to ${target.name}: field sale reported by CleverTap${r.employeeCode?` (employee ${r.employeeCode})`:''}`})
+              ${`Assigned to ${target.name}: reported by CleverTap${r.employeeCode?` (employee ${r.employeeCode})`:''}`})
           `;
           action='created'; created++;
         }
