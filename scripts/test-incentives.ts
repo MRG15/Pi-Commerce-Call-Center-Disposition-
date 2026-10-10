@@ -115,9 +115,34 @@ const w=(week:string,p:string)=>wk.find(r=>r.weekStart===week&&r.person===p)!;
 assert.equal(w('2026-09-28','Sheena').revenue,45000); assert.equal(w('2026-09-28','Sheena').slabPay,3000);
 assert.equal(w('2026-09-28','Neha').slabPay,5000); assert.equal(w('2026-09-28','Sheena').teamShare,2500); assert.equal(w('2026-09-28','Sheena').pay,5500);
 assert.equal(w('2026-09-28','Jay').pay,8000);
-// Neha becomes SBDE on Wed 7 Oct: her week of 5 Oct is still priced as a BDE under Sheena.
-assert.equal(w('2026-10-05','Neha').role,'BDE'); assert.equal(w('2026-10-05','Neha').slabPay,2000);
-assert.equal(w('2026-10-05','Sheena').teamShare,1000);
+// Neha becomes SBDE on Wed 7 Oct: from that day her sales count as an SBDE. Her ₹30k on 8 Oct
+// is priced on SBDE slabs (below ₹40k, so ₹0) and no longer earns Sheena a team share.
+const nehaWk=wk.filter(r=>r.weekStart==='2026-10-05'&&r.person==='Neha');
+assert.equal(nehaWk.length,1); assert.equal(nehaWk[0].role,'SBDE'); assert.equal(nehaWk[0].activeFrom,'2026-10-07');
+assert.equal(nehaWk[0].revenue,30000); assert.equal(nehaWk[0].slabPay,0);
+assert.equal(wk.find(r=>r.weekStart==='2026-10-05'&&r.person==='Sheena'),undefined);
+
+// Role applies from the day it changes. Ravi is a CSM (no seller role) until Fri 9 Oct and an
+// SBDE from Sat 10 Oct: his Sat–Sun ₹40k earns the SBDE ₹40k slab; Thursday's sale earns nothing.
+// Meera is a BDE under Sheena Mon–Fri and an SBDE from Saturday: each part is priced on its own.
+const roles2=[...roles,
+  {person:'Ravi',role:'SBDE' as const,teamLead:null,effectiveFrom:'2026-10-10'},
+  {person:'Meera',role:'BDE' as const,teamLead:'Sheena',effectiveFrom:'2026-10-05'},
+  {person:'Meera',role:'SBDE' as const,teamLead:null,effectiveFrom:'2026-10-10'},
+];
+const wk2=sellerRevenueIncentives([
+  sale('2026-10-08','Ravi',20000),sale('2026-10-10','Ravi',25000),sale('2026-10-11','Ravi',15000),
+  sale('2026-10-06','Meera',35000),sale('2026-10-10','Meera',45000),
+],roles2,'2026-10-05','2026-10-11');
+const ravi=wk2.filter(r=>r.person==='Ravi');
+assert.equal(ravi.length,1); assert.equal(ravi[0].role,'SBDE'); assert.equal(ravi[0].revenue,40000);
+assert.equal(ravi[0].activeFrom,'2026-10-10'); assert.equal(ravi[0].activeTo,'2026-10-11'); assert.equal(ravi[0].pay,3000);
+const meeraBde=wk2.find(r=>r.person==='Meera'&&r.role==='BDE')!, meeraSbde=wk2.find(r=>r.person==='Meera'&&r.role==='SBDE')!;
+assert.equal(meeraBde.revenue,35000); assert.equal(meeraBde.slabPay,2000); assert.equal(meeraBde.activeTo,'2026-10-09');
+assert.equal(meeraSbde.revenue,45000); assert.equal(meeraSbde.slabPay,3000); assert.equal(meeraSbde.activeFrom,'2026-10-10');
+// Sheena (TL, no own sales that week) still earns half of Meera's BDE-days payout.
+const sheena2=wk2.find(r=>r.person==='Sheena')!;
+assert.equal(sheena2.teamShare,1000); assert.equal(sheena2.pay,1000);
 // A week whose Sunday is outside the range is not paid.
 assert.equal(sellerRevenueIncentives([sale('2026-10-01','Jay',90000)],roles,'2026-10-01','2026-10-03').length,0);
 
