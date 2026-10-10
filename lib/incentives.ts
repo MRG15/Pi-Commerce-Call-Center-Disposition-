@@ -69,6 +69,8 @@ export const SELLER_ROSTER:Membership[] = [
   { name:'Jay', from:'2026-08-06' },
 ];
 
+// Onboarder / CSM incentive eligibility now comes from team membership by date (team_changes,
+// managed in Manage Access → Teams). This list is only the fallback when that table is absent.
 export const ONBOARDER_ROSTER:Membership[] = [
   { name:'Ashish', from:'2026-09-01' },
   { name:'Dhruv', from:'2026-09-01' },
@@ -192,47 +194,77 @@ export function sellerIncentives(saleDays:SaleDay[],from:string,to:string){
   return {daily,weekly};
 }
 
-export type RevenueWeekRow = { weekStart:string; weekEnd:string; person:string; role:SellerRole; teamLead:string|null; revenue:number; sales:number; plan:string; slabPay:number; teamShare:number; pay:number };
+export type RevenueWeekRow = { weekStart:string; weekEnd:string; person:string; role:SellerRole; teamLead:string|null; activeFrom:string; activeTo:string; revenue:number; sales:number; plan:string; slabPay:number; teamShare:number; pay:number };
 
 // Weekly revenue incentive (from 1 Oct 2026) for weeks whose Sunday falls in [from,to].
 // Only sales dated on or after the plan start count, so the first week is 1–4 Oct 2026.
-// Role and team are taken as on the week's first plan day; a mid-week change applies from
-// the next week. `sales` must cover at least the Monday of `from`'s week through `to`.
-export function sellerRevenueIncentives(sales:CountedSale[],roles:SellerRoleRow[],from:string,to:string):RevenueWeekRow[]{
-  const weeks=new Map<string,{weekStart:string;weekEnd:string;firstDay:string;plan:SellerRevenuePlan;people:Map<string,{revenue:number;sales:number}>}>();
+// A role applies from the day it changes: each sale counts under the role in force on its
+// date, and each role held during the week is priced on its own slabs with the sales made
+// under it (activeFrom–activeTo). Someone made SBDE on Saturday earns SBDE slabs on their
+// Sat–Sun revenue; days before stay under their earlier role. Days with no role earn nothing.
+// `sales` must cover at least the Monday of `from`'s week through `to`.
+// `earns(person,date)` (optional) can switch the incentive off for someone on a day, e.g. a Sales
+// team member marked not eligible; a sale on such a day counts for nothing.
+export function sellerRevenueIncentives(sales:CountedSale[],roles:SellerRoleRow[],from:string,to:string,earns?:(person:string,date:string)=>boolean):RevenueWeekRow[]{
+  type Seg={weekStart:string;weekEnd:string;plan:SellerRevenuePlan;person:string;role:SellerRole;teamLead:string|null;activeFrom:string;activeTo:string;revenue:number;sales:number};
+  const segs=new Map<string,Seg>();
+  const keyOf=(weekStart:string,person:string,role:string,teamLead:string|null)=>`${weekStart}|${person}|${role}|${teamLead||''}`;
+  // Days of the week (from the plan start) on which `person` held this exact role and team.
+  const windowOf=(weekStart:string,weekEnd:string,planFrom:string,person:string,role:SellerRole,teamLead:string|null)=>{
+    let a='',b='';
+    for(let d=weekStart<planFrom?planFrom:weekStart;d<=weekEnd;d=addDays(d,1)){
+      const r=roleOn(roles,person,d);
+      if(r&&r.role===role&&(r.teamLead||null)===teamLead){ if(!a)a=d; b=d; }
+    }
+    return {a,b};
+  };
+  const segOf=(weekStart:string,plan:SellerRevenuePlan,person:string,role:SellerRole,teamLead:string|null)=>{
+    const k=keyOf(weekStart,person,role,teamLead);
+    let g=segs.get(k);
+    if(!g){
+      const weekEnd=addDays(weekStart,6);
+      const {a,b}=windowOf(weekStart,weekEnd,plan.from,person,role,teamLead);
+      g={weekStart,weekEnd,plan,person,role,teamLead,activeFrom:a,activeTo:b,revenue:0,sales:0};
+      segs.set(k,g);
+    }
+    return g;
+  };
   for(const s of sales){
     const plan=planOn(SELLER_REVENUE_PLANS,s.date);
     if(!plan) continue;
     const weekStart=mondayOf(s.date), weekEnd=addDays(weekStart,6);
     if(weekEnd<from||weekEnd>to) continue;
-    const w=weeks.get(weekStart)||{weekStart,weekEnd,firstDay:weekStart<plan.from?plan.from:weekStart,plan,people:new Map()};
-    const p=w.people.get(s.person)||{revenue:0,sales:0};
-    p.revenue+=s.revenue; p.sales++; w.people.set(s.person,p); weeks.set(weekStart,w);
+    const r=roleOn(roles,s.person,s.date);
+    if(!r) continue; // no seller role on the day of the sale
+    if(earns&&!earns(s.person,s.date)) continue; // not eligible for the incentive that day
+    const g=segOf(weekStart,plan,s.person,r.role,r.role==='BDE'?r.teamLead:null);
+    g.revenue+=s.revenue; g.sales++;
   }
-  // Team Leads earn a share of their BDEs' payouts even in a week with no own sales.
-  for(const r of roles){
-    if(r.role!=='TL') continue;
-    for(const w of weeks.values()) if(roleOn(roles,r.person,w.firstDay)?.role==='TL'&&!w.people.has(r.person)) w.people.set(r.person,{revenue:0,sales:0});
+  const rows=new Map<string,RevenueWeekRow>();
+  for(const [k,g] of segs){
+    const slabPay=revenueSlabPay(g.plan.slabs[g.role as 'BDE'|'SBDE'|'TL'],g.revenue);
+    rows.set(k,{weekStart:g.weekStart,weekEnd:g.weekEnd,person:g.person,role:g.role,teamLead:g.teamLead,activeFrom:g.activeFrom,activeTo:g.activeTo,revenue:g.revenue,sales:g.sales,plan:g.plan.name,slabPay,teamShare:0,pay:slabPay});
   }
-  const out:RevenueWeekRow[]=[];
-  for(const w of weeks.values()){
-    const rows=new Map<string,RevenueWeekRow>();
-    for(const [person,p] of w.people){
-      const r=roleOn(roles,person,w.firstDay);
-      if(!r||r.role==='NONE') continue;
-      const slabPay=revenueSlabPay(w.plan.slabs[r.role as 'BDE'|'SBDE'|'TL'],p.revenue);
-      rows.set(person,{weekStart:w.weekStart,weekEnd:w.weekEnd,person,role:r.role,teamLead:r.role==='BDE'?r.teamLead:null,revenue:p.revenue,sales:p.sales,plan:w.plan.name,slabPay,teamShare:0,pay:slabPay});
+  // Team Leads earn a share of each BDE payout made under them, even in a week with no own
+  // sales, as long as they are a TL during the days that BDE worked under them.
+  for(const r of [...rows.values()]){
+    if(r.role!=='BDE'||!r.teamLead||!r.slabPay) continue;
+    const leadRole=roleOn(roles,r.teamLead,r.activeTo);
+    if(leadRole?.role!=='TL') continue;
+    if(earns&&!earns(r.teamLead,r.activeTo)) continue;
+    const plan=planOn(SELLER_REVENUE_PLANS,r.activeTo)!;
+    const k=keyOf(r.weekStart,r.teamLead,'TL',null);
+    let lead=rows.get(k);
+    if(!lead){
+      const g=segOf(r.weekStart,plan,r.teamLead,'TL',null);
+      lead={weekStart:g.weekStart,weekEnd:g.weekEnd,person:g.person,role:'TL',teamLead:null,activeFrom:g.activeFrom,activeTo:g.activeTo,revenue:0,sales:0,plan:plan.name,slabPay:0,teamShare:0,pay:0};
+      rows.set(k,lead);
     }
-    for(const r of rows.values()){
-      if(r.role!=='BDE'||!r.teamLead||!r.slabPay) continue;
-      const lead=rows.get(r.teamLead);
-      if(!lead||lead.role!=='TL') continue;
-      const share=Math.round(r.slabPay*w.plan.tlShareOfBde*100)/100;
-      lead.teamShare+=share; lead.pay+=share;
-    }
-    out.push(...rows.values());
+    const share=Math.round(r.slabPay*plan.tlShareOfBde*100)/100;
+    lead.teamShare+=share; lead.pay+=share;
   }
-  out.sort((a,b)=>a.weekStart.localeCompare(b.weekStart)||b.pay-a.pay||a.person.localeCompare(b.person));
+  const out=[...rows.values()];
+  out.sort((a,b)=>a.weekStart.localeCompare(b.weekStart)||b.pay-a.pay||a.person.localeCompare(b.person)||a.activeFrom.localeCompare(b.activeFrom));
   return out;
 }
 
@@ -255,21 +287,24 @@ export const BACKFILLED_TOP_UPS:TopUp[] = [
 export type PaidRenewal = { date:string; person:string; amount:number; customerId:string };
 export type OnboarderLedgerRow = { date:string; person:string; cases:number; casePay:number; topUps:number; topUpValue:number; topUpPay:number; renewals:number; renewalValue:number; renewalPay:number; plan:string; pay:number };
 
-export function onboarderIncentives(cases:AdsLiveCase[],topUps:TopUp[],from:string,to:string,renewals:PaidRenewal[]=[]){
+// `earns(person,date)` says who earns the onboarder / CSM incentive on a day (team membership
+// with incentive on); without it the ONBOARDER_ROSTER list is used.
+export function onboarderIncentives(cases:AdsLiveCase[],topUps:TopUp[],from:string,to:string,renewals:PaidRenewal[]=[],earns?:(person:string,date:string)=>boolean){
+  const eligible=earns||((person:string,date:string)=>isMember(ONBOARDER_ROSTER,person,date));
   const rows=new Map<string,OnboarderLedgerRow>();
   const row=(date:string,person:string)=>{const k=`${date}|${person}`;const r=rows.get(k)||{date,person,cases:0,casePay:0,topUps:0,topUpValue:0,topUpPay:0,renewals:0,renewalValue:0,renewalPay:0,plan:planOn(ONBOARDER_PLANS,date)?.name||'—',pay:0};rows.set(k,r);return r;};
   for(const c of cases){
-    if(c.date<from||c.date>to||!isMember(ONBOARDER_ROSTER,c.person,c.date)||!planOn(ONBOARDER_PLANS,c.date)) continue;
+    if(c.date<from||c.date>to||!eligible(c.person,c.date)||!planOn(ONBOARDER_PLANS,c.date)) continue;
     row(c.date,c.person).cases++;
   }
   for(const t of topUps){
     const plan=planOn(ONBOARDER_PLANS,t.date);
-    if(t.date<from||t.date>to||!plan||!isMember(ONBOARDER_ROSTER,t.person,t.date)) continue;
+    if(t.date<from||t.date>to||!plan||!eligible(t.person,t.date)) continue;
     const r=row(t.date,t.person); r.topUps++; r.topUpValue+=t.amount; r.topUpPay+=topUpPay(plan,t.amount);
   }
   for(const t of renewals){
     const plan=planOn(ONBOARDER_PLANS,t.date);
-    if(t.date<from||t.date>to||!plan?.paysRenewals||!isMember(ONBOARDER_ROSTER,t.person,t.date)) continue;
+    if(t.date<from||t.date>to||!plan?.paysRenewals||!eligible(t.person,t.date)) continue;
     const r=row(t.date,t.person); r.renewals++; r.renewalValue+=t.amount; r.renewalPay+=topUpPay(plan,t.amount);
   }
   const out=[...rows.values()].map(r=>{const plan=planOn(ONBOARDER_PLANS,r.date);const casePay=plan?onboarderCasePay(plan,r.cases):0;return {...r,casePay,topUpPay:Math.round(r.topUpPay*100)/100,renewalPay:Math.round(r.renewalPay*100)/100,pay:Math.round((casePay+r.topUpPay+r.renewalPay)*100)/100};});
