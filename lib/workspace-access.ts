@@ -1,5 +1,6 @@
 import { currentAgent } from './auth';
 import { db } from './db';
+import { applyDueTeamChanges } from './teams';
 
 export type Workspace = 'seller'|'onboarding'|'csm';
 export type WorkspaceRole = 'agent'|'customer_success'|'admin'|null;
@@ -8,6 +9,8 @@ export async function currentUserAccess(){
   const agent:any=await currentAgent();
   if(!agent) return null;
   const sql=db();
+  // Team moves dated today or earlier take effect before access is read.
+  await applyDueTeamChanges(sql).catch(()=>{});
   const schema=await sql`
     SELECT
       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='agents' AND column_name='is_super_admin') AS has_super,

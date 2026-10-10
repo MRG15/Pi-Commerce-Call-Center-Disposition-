@@ -6,6 +6,7 @@ import {
   SELLER_DAILY_PLANS,SELLER_WEEKLY_PLANS,SELLER_REVENUE_PLANS,ONBOARDER_PLANS,SALE_COUNTING_RULES,SELLER_ROSTER,ONBOARDER_ROSTER,
 } from '@/lib/incentives';
 import { loadSellerRoles } from '@/lib/seller-roles';
+import { loadTeamChanges,earnsOn,teamStateOn } from '@/lib/teams';
 
 const isDate=(v:string|null)=>Boolean(v&&/^\d{4}-\d{2}-\d{2}$/.test(v));
 const round=(n:number)=>Math.round(n*100)/100;
@@ -42,6 +43,11 @@ export async function GET(req:Request){
     WHERE e.l0_code='OB_SUBS_RENEWED' AND e.event_date<=${to}::date
   `;
   const roles=await loadSellerRoles(sql);
+  const teams=await loadTeamChanges(sql);
+  // Onboarding / CSM incentive: on either team that day with incentive on. Sales: a role is
+  // needed (seller_roles); a Sales team member marked not eligible earns nothing that day.
+  const earnsOnboarding=teams.length?(p:string,d:string)=>earnsOn(teams,['onboarding','csm'],p,d):undefined;
+  const earnsSales=teams.length?(p:string,d:string)=>{const s=teamStateOn(teams,p,'sales',d);return !s||!s.member||s.incentive;}:undefined;
   // Ads Live cases credited to the case's assignee; externally-live (Sub Raw) cases never count.
   const adsLive=await sql`
     SELECT (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date::text AS date,a.name AS person
@@ -62,12 +68,13 @@ export async function GET(req:Request){
   const paymentCalls=calls.map((c:any)=>({customerId:String(c.customer_id),date:c.date,seq:Number(c.call_seq),attempt:Number(c.attempt_number),person:c.person,planAmount:c.plan_amount==null?null:Number(c.plan_amount)}));
   const saleDays=countSales(paymentCalls,renewals.map((r:any)=>({date:r.date,person:r.logged_by}))).filter(s=>s.date>=mondayOf(from!));
   const seller=sellerIncentives(saleDays,from!,to!);
-  const revenueWeeks=sellerRevenueIncentives(countedSales(paymentCalls).filter(s=>s.date>=mondayOf(from!)),roles,from!,to!);
+  const revenueWeeks=sellerRevenueIncentives(countedSales(paymentCalls).filter(s=>s.date>=mondayOf(from!)),roles,from!,to!,earnsSales);
   const onboarder=onboarderIncentives(
     adsLive.map((c:any)=>({date:c.date,person:c.person})),
     [...topUps.map((t:any)=>({date:t.date,person:t.person,amount:Number(t.amount),customerId:String(t.customer_id)})),...BACKFILLED_TOP_UPS],
     from!,to!,
     renewals.map((r:any)=>({date:r.date,person:r.credited_to,amount:Number(r.plan_amount||0),customerId:String(r.customer_id)})),
+    earnsOnboarding,
   );
 
   const people=new Map<string,any>();

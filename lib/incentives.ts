@@ -69,6 +69,8 @@ export const SELLER_ROSTER:Membership[] = [
   { name:'Jay', from:'2026-08-06' },
 ];
 
+// Onboarder / CSM incentive eligibility now comes from team membership by date (team_changes,
+// managed in Manage Access → Teams). This list is only the fallback when that table is absent.
 export const ONBOARDER_ROSTER:Membership[] = [
   { name:'Ashish', from:'2026-09-01' },
   { name:'Dhruv', from:'2026-09-01' },
@@ -201,7 +203,9 @@ export type RevenueWeekRow = { weekStart:string; weekEnd:string; person:string; 
 // under it (activeFrom–activeTo). Someone made SBDE on Saturday earns SBDE slabs on their
 // Sat–Sun revenue; days before stay under their earlier role. Days with no role earn nothing.
 // `sales` must cover at least the Monday of `from`'s week through `to`.
-export function sellerRevenueIncentives(sales:CountedSale[],roles:SellerRoleRow[],from:string,to:string):RevenueWeekRow[]{
+// `earns(person,date)` (optional) can switch the incentive off for someone on a day, e.g. a Sales
+// team member marked not eligible; a sale on such a day counts for nothing.
+export function sellerRevenueIncentives(sales:CountedSale[],roles:SellerRoleRow[],from:string,to:string,earns?:(person:string,date:string)=>boolean):RevenueWeekRow[]{
   type Seg={weekStart:string;weekEnd:string;plan:SellerRevenuePlan;person:string;role:SellerRole;teamLead:string|null;activeFrom:string;activeTo:string;revenue:number;sales:number};
   const segs=new Map<string,Seg>();
   const keyOf=(weekStart:string,person:string,role:string,teamLead:string|null)=>`${weekStart}|${person}|${role}|${teamLead||''}`;
@@ -232,6 +236,7 @@ export function sellerRevenueIncentives(sales:CountedSale[],roles:SellerRoleRow[
     if(weekEnd<from||weekEnd>to) continue;
     const r=roleOn(roles,s.person,s.date);
     if(!r) continue; // no seller role on the day of the sale
+    if(earns&&!earns(s.person,s.date)) continue; // not eligible for the incentive that day
     const g=segOf(weekStart,plan,s.person,r.role,r.role==='BDE'?r.teamLead:null);
     g.revenue+=s.revenue; g.sales++;
   }
@@ -246,6 +251,7 @@ export function sellerRevenueIncentives(sales:CountedSale[],roles:SellerRoleRow[
     if(r.role!=='BDE'||!r.teamLead||!r.slabPay) continue;
     const leadRole=roleOn(roles,r.teamLead,r.activeTo);
     if(leadRole?.role!=='TL') continue;
+    if(earns&&!earns(r.teamLead,r.activeTo)) continue;
     const plan=planOn(SELLER_REVENUE_PLANS,r.activeTo)!;
     const k=keyOf(r.weekStart,r.teamLead,'TL',null);
     let lead=rows.get(k);
@@ -281,21 +287,24 @@ export const BACKFILLED_TOP_UPS:TopUp[] = [
 export type PaidRenewal = { date:string; person:string; amount:number; customerId:string };
 export type OnboarderLedgerRow = { date:string; person:string; cases:number; casePay:number; topUps:number; topUpValue:number; topUpPay:number; renewals:number; renewalValue:number; renewalPay:number; plan:string; pay:number };
 
-export function onboarderIncentives(cases:AdsLiveCase[],topUps:TopUp[],from:string,to:string,renewals:PaidRenewal[]=[]){
+// `earns(person,date)` says who earns the onboarder / CSM incentive on a day (team membership
+// with incentive on); without it the ONBOARDER_ROSTER list is used.
+export function onboarderIncentives(cases:AdsLiveCase[],topUps:TopUp[],from:string,to:string,renewals:PaidRenewal[]=[],earns?:(person:string,date:string)=>boolean){
+  const eligible=earns||((person:string,date:string)=>isMember(ONBOARDER_ROSTER,person,date));
   const rows=new Map<string,OnboarderLedgerRow>();
   const row=(date:string,person:string)=>{const k=`${date}|${person}`;const r=rows.get(k)||{date,person,cases:0,casePay:0,topUps:0,topUpValue:0,topUpPay:0,renewals:0,renewalValue:0,renewalPay:0,plan:planOn(ONBOARDER_PLANS,date)?.name||'—',pay:0};rows.set(k,r);return r;};
   for(const c of cases){
-    if(c.date<from||c.date>to||!isMember(ONBOARDER_ROSTER,c.person,c.date)||!planOn(ONBOARDER_PLANS,c.date)) continue;
+    if(c.date<from||c.date>to||!eligible(c.person,c.date)||!planOn(ONBOARDER_PLANS,c.date)) continue;
     row(c.date,c.person).cases++;
   }
   for(const t of topUps){
     const plan=planOn(ONBOARDER_PLANS,t.date);
-    if(t.date<from||t.date>to||!plan||!isMember(ONBOARDER_ROSTER,t.person,t.date)) continue;
+    if(t.date<from||t.date>to||!plan||!eligible(t.person,t.date)) continue;
     const r=row(t.date,t.person); r.topUps++; r.topUpValue+=t.amount; r.topUpPay+=topUpPay(plan,t.amount);
   }
   for(const t of renewals){
     const plan=planOn(ONBOARDER_PLANS,t.date);
-    if(t.date<from||t.date>to||!plan?.paysRenewals||!isMember(ONBOARDER_ROSTER,t.person,t.date)) continue;
+    if(t.date<from||t.date>to||!plan?.paysRenewals||!eligible(t.person,t.date)) continue;
     const r=row(t.date,t.person); r.renewals++; r.renewalValue+=t.amount; r.renewalPay+=topUpPay(plan,t.amount);
   }
   const out=[...rows.values()].map(r=>{const plan=planOn(ONBOARDER_PLANS,r.date);const casePay=plan?onboarderCasePay(plan,r.cases):0;return {...r,casePay,topUpPay:Math.round(r.topUpPay*100)/100,renewalPay:Math.round(r.renewalPay*100)/100,pay:Math.round((casePay+r.topUpPay+r.renewalPay)*100)/100};});

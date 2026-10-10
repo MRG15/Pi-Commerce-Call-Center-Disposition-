@@ -40,7 +40,8 @@ export async function loadOnboardingRoster(sql:any):Promise<{id:string;name:stri
   if(!ok[0]?.ok) return [];
   const rows=await sql`
     WITH r AS (
-      SELECT a.id,a.name,(SELECT min(added_at) FROM onboarding_roster) AS since
+      -- Counted since the rotation last gained someone, so a newcomer starts level, not behind.
+      SELECT a.id,a.name,(SELECT max(added_at) FROM onboarding_roster) AS since
       FROM onboarding_roster o JOIN agents a ON a.id=o.agent_id
       JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding'
       WHERE a.active=TRUE
