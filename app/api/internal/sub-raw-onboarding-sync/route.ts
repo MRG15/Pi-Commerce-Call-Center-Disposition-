@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { loadOnboardingRoster,takeNextOnboarder } from '@/lib/onboarding';
+import { linkCtPayments } from '@/lib/ct';
 import { PLANS } from '@/lib/plans';
 
 type SourceRow = {
@@ -20,6 +21,7 @@ type SourceRow = {
   planName?: unknown;
   planAmount?: unknown;
   expiryDate?: unknown;
+  mid?: unknown;
 };
 
 type NormalizedRow = {
@@ -46,6 +48,8 @@ type NormalizedRow = {
   planName: string|null;
   planAmount: number|null;
   expiryDate: string|null;
+  // Merchant MID from Sub Raw (optional column), used to link CleverTap payments that came without a Cust ID.
+  mid: string|null;
 };
 
 // An onboarder-marked Ads Live case is checked against Sub Raw once it is at least a day old:
@@ -121,6 +125,7 @@ function normalizeRow(raw:SourceRow):NormalizedRow|null{
     planName:String(raw.planName??'').trim()||null,
     planAmount:planAmountOf(raw.planAmount,raw.planName),
     expiryDate:isIsoDate(String(raw.expiryDate??'').trim())?String(raw.expiryDate).trim():null,
+    mid:/^[A-Za-z0-9]{6,}$/.test(String(raw.mid??'').trim())?String(raw.mid).trim():null,
   };
 }
 
@@ -449,6 +454,14 @@ export async function POST(req:Request){
     `;
   }
   (summary as any).subFieldsUpdated=dryRun?0:subFields.length;
+
+  // CleverTap payments that came with only a MID: link them now that Sub Raw (or AdsRun Raw) gives
+  // the Cust ID, and put the employee code on the case if it has none.
+  if(!dryRun){
+    const known=[...deduped.values()].filter(r=>r.mid).map(r=>({mid:r.mid as string,customer_id:r.customerId}));
+    const ct=await linkCtPayments(sql,known);
+    (summary as any).ctPaymentsLinked=ct.linked; (summary as any).ctEmployeeCodesAdded=ct.codes;
+  }
 
   return NextResponse.json({ok:true,dryRun,cutoffDate,...summary});
 }
