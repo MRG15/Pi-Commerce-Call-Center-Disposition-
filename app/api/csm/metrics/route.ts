@@ -26,8 +26,8 @@ export async function GET(req:Request){
       count(*)::int AS calls,
       count(*) FILTER (WHERE e.l0_code<>'OB_NOT_CONNECTED')::int AS connected,
       count(*) FILTER (WHERE e.l1_code='OB_CALLBACK')::int AS callbacks,
-      count(*) FILTER (WHERE e.l0_code='OB_ADDITIONAL_TOPUP')::int AS topups,
-      COALESCE(sum(e.top_up_amount_inr) FILTER (WHERE e.l0_code='OB_ADDITIONAL_TOPUP'),0)::float8 AS topup_amount,
+      count(*) FILTER (WHERE e.l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED'))::int AS topups,
+      COALESCE(sum(COALESCE(e.top_up_amount_inr,e.upgrade_value_inr)) FILTER (WHERE e.l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED')),0)::float8 AS topup_amount,
       count(*) FILTER (WHERE e.l0_code='OB_SUBS_RENEWED')::int AS renewals,
       COALESCE(sum(e.plan_amount_inr) FILTER (WHERE e.l0_code='OB_SUBS_RENEWED'),0)::float8 AS renewal_amount,
       count(*) FILTER (WHERE e.l0_code='OB_ANOTHER_AD_LIVE')::int AS another_ad,
@@ -41,7 +41,7 @@ export async function GET(req:Request){
   `;
   // Calls in the range, one row each; grouped by bucket below.
   const bucketCalls=await sql`
-    SELECT e.customer_id,e.csm_bucket,e.l0_code,e.l1_code,e.top_up_amount_inr::float8 AS top_up
+    SELECT e.customer_id,e.csm_bucket,e.l0_code,e.l1_code,COALESCE(e.top_up_amount_inr,e.upgrade_value_inr)::float8 AS top_up
     FROM onboarding_events e
     WHERE e.source_type='customer_success_followup'
       AND (e.event_time AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
@@ -84,7 +84,7 @@ export async function GET(req:Request){
     g.calls++;
     if(e.l0_code==='OB_NOT_CONNECTED') g.not_connected++; else g.connected++;
     if(e.l1_code==='OB_CALLBACK') g.callbacks++;
-    if(e.l0_code==='OB_ADDITIONAL_TOPUP'){g.topups++;g.topup_amount+=Number(e.top_up)||0;}
+    if(e.l0_code==='OB_ADDITIONAL_TOPUP'||e.l0_code==='OB_PLAN_UPGRADED'){g.topups++;g.topup_amount+=Number(e.top_up)||0;}
     if(e.l0_code==='OB_SUBS_RENEWED') g.renewals++;
     if(e.l0_code==='OB_NOT_INTERESTED'||e.l0_code==='OB_REFUND_REQUESTED') g.lost++;
     called.set(k,g);

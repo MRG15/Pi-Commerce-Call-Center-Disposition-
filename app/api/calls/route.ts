@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextResponse,after } from 'next/server';
+import { SELLER_WA_L0,triggerSellerWa,resolveCallbackRequests } from '@/lib/wa';
 import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { PLANS, isPlanCode, plansRequiredOn } from '@/lib/plans';
@@ -93,6 +94,14 @@ export async function POST(req: Request) {
         ) RETURNING *
       `;
       return rows[0];
+    });
+    // WhatsApp nudge for Voicemail / Disconnected / Not Connected, and clearing this merchant's
+    // open callback requests, run after the response so the save is never slowed down.
+    after(async()=>{
+      try{
+        await resolveCallbackRequests(sql,'seller',customerId);
+        if(SELLER_WA_L0.includes(l0Code)) await triggerSellerWa(sql,customerId,String(agent.id),String(result.id));
+      }catch(e){console.error('seller whatsapp error',e);}
     });
     return NextResponse.json({ok:true,call:result});
   } catch (e:any) {

@@ -20,7 +20,7 @@ export async function GET(req:Request){
         AND c.ads_live_at IS NOT NULL
         AND (
           e.source_type='customer_success_followup'
-          OR (e.l0_code='OB_ADDITIONAL_TOPUP' AND e.event_time>=c.ads_live_at)
+          OR (e.l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED') AND e.event_time>=c.ads_live_at)
         )
     )
     SELECT
@@ -29,9 +29,9 @@ export async function GET(req:Request){
       COUNT(*) FILTER (WHERE callback_at IS NOT NULL)::int AS callbacks_scheduled,
       COUNT(*) FILTER (WHERE l0_code='OB_ANOTHER_AD_LIVE')::int AS another_ads_live,
       COUNT(*) FILTER (WHERE l0_code='OB_CREATIVE_UPDATED')::int AS creatives_updated,
-      COUNT(*) FILTER (WHERE l0_code='OB_ADDITIONAL_TOPUP')::int AS top_up_count,
+      COUNT(*) FILTER (WHERE l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED'))::int AS top_up_count,
       COUNT(*) FILTER (WHERE l0_code='OB_SUBS_RENEWED')::int AS subscriptions_renewed,
-      COALESCE(SUM(top_up_amount_inr) FILTER (WHERE l0_code='OB_ADDITIONAL_TOPUP'),0)::numeric AS top_up_amount,
+      COALESCE(SUM(COALESCE(top_up_amount_inr,upgrade_value_inr)) FILTER (WHERE l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED')),0)::numeric AS top_up_amount,
       COUNT(*) FILTER (WHERE l0_code='OB_NOT_INTERESTED')::int AS not_interested,
       COUNT(*) FILTER (WHERE l0_code='OB_REFUND_REQUESTED')::int AS refund_requested,
       COUNT(*) FILTER (WHERE l0_code='OB_IN_PROCESS')::int AS in_process,
@@ -50,7 +50,7 @@ export async function GET(req:Request){
         AND e.agent_id IS NOT NULL
         AND (
           e.source_type='customer_success_followup'
-          OR (e.l0_code='OB_ADDITIONAL_TOPUP' AND e.event_time>=c.ads_live_at)
+          OR (e.l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED') AND e.event_time>=c.ads_live_at)
         )
     )
     SELECT a.id,a.name,
@@ -59,9 +59,9 @@ export async function GET(req:Request){
       COUNT(p.id) FILTER (WHERE p.callback_at IS NOT NULL)::int AS callbacks_scheduled,
       COUNT(p.id) FILTER (WHERE p.l0_code='OB_ANOTHER_AD_LIVE')::int AS another_ads_live,
       COUNT(p.id) FILTER (WHERE p.l0_code='OB_CREATIVE_UPDATED')::int AS creatives_updated,
-      COUNT(p.id) FILTER (WHERE p.l0_code='OB_ADDITIONAL_TOPUP')::int AS top_up_count,
+      COUNT(p.id) FILTER (WHERE p.l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED'))::int AS top_up_count,
       COUNT(p.id) FILTER (WHERE p.l0_code='OB_SUBS_RENEWED')::int AS subscriptions_renewed,
-      COALESCE(SUM(p.top_up_amount_inr) FILTER (WHERE p.l0_code='OB_ADDITIONAL_TOPUP'),0)::numeric AS top_up_amount,
+      COALESCE(SUM(COALESCE(p.top_up_amount_inr,p.upgrade_value_inr)) FILTER (WHERE p.l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED')),0)::numeric AS top_up_amount,
       COUNT(p.id) FILTER (WHERE p.l0_code='OB_NOT_INTERESTED')::int AS not_interested,
       COUNT(p.id) FILTER (WHERE p.l0_code='OB_REFUND_REQUESTED')::int AS refund_requested
     FROM post_live p
