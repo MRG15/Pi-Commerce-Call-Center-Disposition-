@@ -1,6 +1,6 @@
 'use client';
 import UpgradePicker from './UpgradePicker';
-import CallbackRequests from './CallbackRequests';
+import CallbackRequestList,{useCallbackRequests} from './CallbackRequests';
 import { useEffect,useMemo,useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
@@ -9,7 +9,7 @@ import { multiSort,NO_SORT,type SortState } from '@/lib/sort';
 import SortPicker from '@/components/SortPicker';
 
 type Node={id:string;code:string;label:string;level:number;parent_id:string|null};
-type View='queues'|'callbacks'|'metrics'|'notes'|'allocation';
+type View='queues'|'callbacks'|'reqcb'|'metrics'|'notes'|'allocation';
 type Tab='ending'|'ended'|'cx'|'closed'|'onb_lost'|'all';
 type CxSub=''|'cancelled'|'lapsed';
 type SortBy='impressions'|'spend'|'credits';
@@ -45,6 +45,7 @@ const SOURCE_LABEL:any={customer_success_followup:'CSM',new_event:'Onboarding',h
 export default function CsmConsole(){
   const router=useRouter();
   const [user,setUser]=useState<any>(null),[data,setData]=useState<any>(null),[nodes,setNodes]=useState<Node[]>([]);
+  const reqCb=useCallbackRequests('csm');
   const [view,setView]=useState<View>('queues'),[tab,setTab]=useState<Tab>('ending'),[search,setSearch]=useState(''),[csmFilter,setCsmFilter]=useState('');
   const [cxSub,setCxSub]=useState<CxSub>(''),[sortBy,setSortBy]=useState<SortState<SortBy>>({...NO_SORT}),[callFilter,setCallFilter]=useState<CallFilter>('');
   const [selected,setSelected]=useState<any>(null),[detailLoading,setDetailLoading]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true);
@@ -89,7 +90,7 @@ export default function CsmConsole(){
   const dueCallbacks=callbacks.filter(m=>new Date(m.next_callback).getTime()<=new Date(todayIst()+'T23:59:59+05:30').getTime()).length;
 
   if(loading||!user)return <div className="center">Loading CSM workspace…</div>;
-  const nav:[View,string][]=[['queues','Queues'],['callbacks',`Callbacks${dueCallbacks?` (${dueCallbacks})`:''}`],['metrics','Daily Metrics'],...(admin?[['notes','Pitch Notes'],['allocation','Allocation']] as [View,string][]:[])];
+  const nav:[View,string][]=[['queues','Queues'],['callbacks',`Callbacks${dueCallbacks?` (${dueCallbacks})`:''}`],['reqcb',`Req Call Back${reqCb.length?` (${reqCb.length})`:''}`],['metrics','Daily Metrics'],...(admin?[['notes','Pitch Notes'],['allocation','Allocation']] as [View,string][]:[])];
 
   return <div className="app-shell">
     <header><div><strong>Pi Commerce</strong><span> · CSM Workspace</span></div><div className="header-actions">
@@ -102,7 +103,7 @@ export default function CsmConsole(){
       <nav className="side-nav">{nav.map(([k,l])=><button key={k} className={view===k?'active':''} onClick={()=>setView(k)}>{l}</button>)}</nav>
       <main className="leads-main">
         {error&&<div className="error card">{error}</div>}
-        <CallbackRequests workspace="csm" showOwner={admin} onOpen={(r:any)=>openMerchant(r.customer_id)}/>
+        {view==='reqcb'&&<CallbackRequestList rows={reqCb} showOwner={admin} onOpen={(r:any)=>openMerchant(r.customer_id)}/>}
         {!data?.run&&<div className="card empty">No SMB Daily Tracker data yet. The queues fill after the first daily sync (Sub Raw + AdsRun Raw) completes.</div>}
         {data?.run&&view!=='notes'&&view!=='allocation'&&<div className="note csm-sync-note">Data as of {fmt(data.run.finished_at)} · {num(data.run.subs_rows)} subscriptions · {num(data.run.ads_rows)} ads</div>}
         {(view==='queues'||view==='callbacks')&&<section className="card">
