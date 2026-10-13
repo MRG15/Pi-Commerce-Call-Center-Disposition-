@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  ladderPay,weeklyPay,onboarderCasePay,topUpPay,planOn,countSales,countedSales,sellerIncentives,sellerRevenueIncentives,onboarderIncentives,mondayOf,revenueSlabPay,
+  ladderPay,weeklyPay,sellerPlanDailyIncentives,planLadderPay,onboarderCasePay,topUpPay,planOn,countSales,countedSales,sellerIncentives,sellerRevenueIncentives,onboarderIncentives,mondayOf,revenueSlabPay,
   SELLER_REVENUE_PLANS,
   SELLER_DAILY_PLANS,SELLER_WEEKLY_PLANS,ONBOARDER_PLANS,BACKFILLED_TOP_UPS,
 } from '../lib/incentives';
@@ -161,3 +161,22 @@ const sd2=countSales([],[{date:'2026-09-29',person:'Kunal'},{date:'2026-10-02',p
 assert.equal(sd2.length,1); assert.equal(sd2[0].date,'2026-09-29');
 
 console.log('All incentive checks passed.');
+
+// Daily plan incentive from 1 Oct 2026: each plan counted on its own per seller per day.
+{
+  const r3=[{person:'Jay',role:'SBDE' as const,teamLead:null,effectiveFrom:'2026-10-01'},{person:'Neha',role:'BDE' as const,teamLead:'Sheena',effectiveFrom:'2026-10-05'}];
+  const sale=(date:string,person:string,plan:string)=>({date,person,plan});
+  const d=sellerPlanDailyIncentives([
+    sale('2026-10-02','Jay','silver'),sale('2026-10-02','Jay','silver'),sale('2026-10-02','Jay','silver'),sale('2026-10-02','Jay','silver'),sale('2026-10-02','Jay','gold'),
+    sale('2026-10-03','Jay','silver'),sale('2026-10-03','Jay','silver'),sale('2026-10-03','Jay','silver'),sale('2026-10-03','Jay','silver'),sale('2026-10-03','Jay','silver'),sale('2026-10-03','Jay','silver'),
+    sale('2026-10-03','Jay','gold'),sale('2026-10-03','Jay','gold'),sale('2026-10-03','Jay','gold'),sale('2026-10-03','Jay','platinum'),sale('2026-10-03','Jay','platinum'),
+    sale('2026-10-04','Neha','platinum'),   // no role yet on 4 Oct
+    sale('2026-09-30','Jay','platinum'),    // before the plan
+  ],r3,'2026-09-28','2026-10-11');
+  const j2=d.find(x=>x.date==='2026-10-02')!, j3=d.find(x=>x.date==='2026-10-03')!;
+  assert.equal(j2.silverPay,200); assert.equal(j2.goldPay,0); assert.equal(j2.pay,200);
+  assert.equal(j3.silverPay,400); assert.equal(j3.goldPay,500); assert.equal(j3.platinumPay,600); assert.equal(j3.pay,1500);
+  assert.equal(d.length,2);
+  assert.equal(planLadderPay({unlock:1,unlockPay:300,extra:300},0),0);
+}
+console.log('Daily plan incentive checks passed.');

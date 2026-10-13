@@ -1,4 +1,5 @@
 'use client';
+import UpgradePicker from './UpgradePicker';
 import { useEffect,useMemo,useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
@@ -163,23 +164,23 @@ function MerchantList({rows,selectedId,onOpen,admin,callbacks}:{rows:any[];selec
 
 function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node[];admin:boolean;csms:any[];row:any;onSaved:()=>Promise<void>}){
   const [l0,setL0]=useState(''),[l1,setL1]=useState(''),[l2,setL2]=useState(''),[remark,setRemark]=useState(''),[cbDate,setCbDate]=useState(''),[cbTime,setCbTime]=useState('');
-  const [topUp,setTopUp]=useState(''),[plan,setPlan]=useState(''),[saving,setSaving]=useState(false),[msg,setMsg]=useState(''),[err,setErr]=useState('');
+  const [topUp,setTopUp]=useState(''),[plan,setPlan]=useState(''),[upCurrent,setUpCurrent]=useState<string|null>(null),[saving,setSaving]=useState(false),[msg,setMsg]=useState(''),[err,setErr]=useState('');
   const [note,setNote]=useState('');
   useEffect(()=>{setL0('');setL1('');setL2('');setRemark('');setCbDate('');setCbTime('');setTopUp('');setPlan('');setMsg('');setErr('');setNote('');},[data.customerId]);
   const l0s=nodes.filter(n=>n.level===0); const l0n=nodes.find(n=>n.code===l0); const l1s=nodes.filter(n=>n.level===1&&n.parent_id===l0n?.id);
   const l1n=nodes.find(n=>n.code===l1); const l2s=nodes.filter(n=>n.level===2&&n.parent_id===l1n?.id);
-  const topUpMode=l0==='OB_ADDITIONAL_TOPUP'; const planNeeded=l0==='OB_SUBS_RENEWED'; const planRequired=planNeeded&&plansRequiredOn(todayIst());
-  const callbackRequired=l1==='OB_CALLBACK'; const callbackAvailable=!topUpMode&&!!l0;
+  const topUpMode=l0==='OB_ADDITIONAL_TOPUP'; const planNeeded=l0==='OB_SUBS_RENEWED'; const upgradeMode=l0==='OB_PLAN_UPGRADED'; const planRequired=planNeeded&&plansRequiredOn(todayIst());
+  const callbackRequired=l1==='OB_CALLBACK'; const callbackAvailable=!topUpMode&&!upgradeMode&&!!l0;
   const s=data.subscription||{}; const m=data.merchant||{}; const c=data.case;
   const pitches=data.notes.filter((n:any)=>n.kind==='pitch'); const remarks=data.notes.filter((n:any)=>n.kind==='sheet_remark');
   const canLog=Boolean(c); const onbLost=c?.current_status==='lost';
-  const invalid=!l0||(l1s.length>0&&!l1&&!topUpMode)||(l2s.length>0&&!l2)||(callbackRequired&&(!cbDate||!cbTime))||(topUpMode&&!(Number(topUp)>0))||(planRequired&&!plan);
+  const invalid=!l0||(l1s.length>0&&!l1&&!topUpMode)||(l2s.length>0&&!l2)||(callbackRequired&&(!cbDate||!cbTime))||(topUpMode&&!(Number(topUp)>0))||(planRequired&&!plan)||(upgradeMode&&!plan);
 
   async function save(){
     if(callbackAvailable&&Boolean(cbDate)!==Boolean(cbTime)){setErr('Enter both callback date and time, or leave both blank.');return;}
     setSaving(true);setErr('');setMsg('');
     const r=await fetch('/api/csm/events',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({customerId:data.customerId,l0Code:l0,l1Code:l1||null,l2Code:l2||null,remark,
-      callbackDate:callbackAvailable&&cbDate?cbDate:null,callbackTime:callbackAvailable&&cbTime?cbTime:null,topUpAmount:topUpMode?topUp:null,planCode:planNeeded&&plan?plan:null,
+      callbackDate:callbackAvailable&&cbDate?cbDate:null,callbackTime:callbackAvailable&&cbTime?cbTime:null,topUpAmount:topUpMode?topUp:null,planCode:(planNeeded||upgradeMode)&&plan?plan:null,currentPlan:upgradeMode?upCurrent:null,
       bucket:row?(row.closed?'closed':row.queue):null})});
     const j=await r.json(); setSaving(false);
     if(!r.ok){setErr(j.error||'Could not save');return;}
@@ -233,10 +234,11 @@ function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node
     {!c?<div className="empty">This merchant has no onboarding case in the portal, so calls can't be logged yet. Ask an onboarding admin to add the case.</div>:
      <>{onbLost&&<div className="note">Onboarding closed this merchant as Not Interested / Refund. Low priority; log a call only if you choose to call.</div>}
       <div className="form-grid">
-        <label>Outcome<select value={l0} onChange={e=>{setL0(e.target.value);setL1('');setL2('');setCbDate('');setCbTime('');setTopUp('');setPlan('');}}><option value="">Select outcome</option>{l0s.map(n=><option key={n.id} value={n.code}>{n.label}</option>)}</select></label>
+        <label>Outcome<select value={l0} onChange={e=>{setL0(e.target.value);setL1('');setL2('');setCbDate('');setCbTime('');setTopUp('');setPlan('');setUpCurrent(null);}}><option value="">Select outcome</option>{l0s.map(n=><option key={n.id} value={n.code}>{n.label}</option>)}</select></label>
         {l1s.length>0&&<label>Reason<select value={l1} onChange={e=>{setL1(e.target.value);setL2('');}}><option value="">Select reason</option>{l1s.map(n=><option key={n.id} value={n.code}>{n.label}</option>)}</select></label>}
         {l2s.length>0&&<label>Detail<select value={l2} onChange={e=>setL2(e.target.value)}><option value="">Select</option>{l2s.map(n=><option key={n.id} value={n.code}>{n.label}</option>)}</select></label>}
         {topUpMode&&<label>Top-up Amount (₹) *<input type="number" min="1" step="1" value={topUp} onChange={e=>setTopUp(e.target.value)} placeholder="Required"/></label>}
+        {upgradeMode&&<UpgradePicker customerId={data.customerId} plan={plan} onChange={(pl,cur)=>{setPlan(pl);setUpCurrent(cur);}}/>}
         {planNeeded&&<label>Plan Renewed{planRequired?' *':''}<select value={plan} onChange={e=>setPlan(e.target.value)}><option value="">Select plan</option>{Object.entries(PLANS).map(([code,p])=><option key={code} value={code}>{p.label} · ₹{p.price.toLocaleString('en-IN')} + GST</option>)}</select></label>}
         {callbackAvailable&&<><label>Callback Date{callbackRequired?' *':' (optional)'}<input type="date" min={todayIst()} value={cbDate} onChange={e=>setCbDate(e.target.value)}/></label><label>Callback Time{callbackRequired?' *':' (optional)'}<input type="time" value={cbTime} onChange={e=>setCbTime(e.target.value)}/></label></>}
         <label className="wide">Remark<textarea value={remark} onChange={e=>setRemark(e.target.value)} placeholder="What the merchant said / next step"/></label>
@@ -250,7 +252,7 @@ function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node
       <div className="event-top"><b>{fmt(e.event_time)} · {e.by_name||'System'} <span className="csm-src">{SOURCE_LABEL[e.source_type]||e.source_type}</span></b><span className="status">{disp(e.l0_label_snapshot,e.l1_label_snapshot,e.l2_label_snapshot)||'Update'}</span></div>
       {e.callback_at&&<div className="callback-history">Callback: <b>{fmt(e.callback_at)}</b></div>}
       {e.top_up!=null&&<div className="callback-history">Top-up: <b>{money(e.top_up)}</b></div>}
-      {e.plan_code&&<div className="callback-history">Plan: <b>{(PLANS as any)[e.plan_code]?.label||e.plan_code}</b></div>}
+      {e.plan_code&&<div className="callback-history">{e.upgrade_value!=null?'Upgraded to':'Plan'}: <b>{(PLANS as any)[e.plan_code]?.label||e.plan_code}</b>{e.upgrade_value!=null&&<> · upgrade value <b>{money(e.upgrade_value)}</b></>}</div>}
       <div className={e.remark?'remark':'remark muted'}>{e.remark||'No remark logged'}</div>
     </div>)}</div>}
   </>;

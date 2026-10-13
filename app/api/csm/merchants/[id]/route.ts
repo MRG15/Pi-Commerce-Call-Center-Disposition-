@@ -34,7 +34,7 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
   `;
   const events=await sql`
     SELECT e.id,e.event_time,e.source_type,e.l0_code,e.l0_label_snapshot,e.l1_label_snapshot,e.l2_label_snapshot,e.remark,e.callback_at,
-      e.top_up_amount_inr::float8 AS top_up,e.plan_code,COALESCE(a.name,e.agent_name_raw) AS by_name
+      e.top_up_amount_inr::float8 AS top_up,e.plan_code,e.upgrade_value_inr::float8 AS upgrade_value,COALESCE(a.name,e.agent_name_raw) AS by_name
     FROM onboarding_events e LEFT JOIN agents a ON a.id=e.agent_id
     WHERE e.customer_id=${customerId} ORDER BY e.event_time DESC,e.attempt_number DESC LIMIT 200
   `;
