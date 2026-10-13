@@ -46,7 +46,9 @@ export async function queueWa(sql:any,m:QueueInput){
     INSERT INTO wa_messages(token,template,workspace,customer_id,phone,agent_id,source_ref,dedupe_key,variables,status,status_note)
     VALUES(${token},${m.template},${m.workspace},${m.customerId},${m.phone||null},${m.agentId||null},${m.sourceRef||null},${m.dedupeKey||null},
       ${sql.json({...m.variables,callback_token:token})},${m.status||'queued'},${m.note||null})
-    ON CONFLICT (dedupe_key) DO NOTHING
+    -- A message that failed to send is retried the next time its rule runs.
+    ON CONFLICT (dedupe_key) DO UPDATE SET token=EXCLUDED.token,phone=EXCLUDED.phone,variables=EXCLUDED.variables,status='queued',status_note=NULL,source_ref=EXCLUDED.source_ref
+      WHERE wa_messages.status='failed'
     RETURNING id
   `;
   return rows[0]?.id?Number(rows[0].id):null;
@@ -60,7 +62,8 @@ const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
-  T1_RENEW:{name:'tone_renew_test_f',body:['merchant_name','impressions'],callbackButton:'0'},
+  // The platform numbers buttons by position: "Renew Now" (static link) is 0, "Request a callback" is 1.
+  T1_RENEW:{name:'tone_renew_test_f',body:['merchant_name','impressions'],callbackButton:'1'},
   // T4 goes live together with T5 (same merchants, split by credits); until T5 is added it is not sent.
   T4_ENDING_FREE:{name:'tfour_ending_free_test_f',body:['merchant_name','ad_end_date','credits'],callbackButton:'0'},
 };
@@ -160,7 +163,7 @@ export async function runCsmWaTriggers(sql:any,runId:number){
       LEFT JOIN LATERAL (SELECT current_status,reopen_reason FROM onboarding_cases WHERE customer_id=s.customer_id ORDER BY created_at LIMIT 1) c ON TRUE
       WHERE s.sync_run_id=${runId} AND (a.customer_id IS NOT NULL OR COALESCE(s.completed_ads_count,0)>0)
     )
-    SELECT * FROM m WHERE NOT onb_lost AND NOT closed AND NOT COALESCE(reopened,FALSE)
+    SELECT * FROM m WHERE NOT COALESCE(onb_lost,FALSE) AND NOT closed AND NOT COALESCE(reopened,FALSE)
   `;
   // Day one for a template pair = the first run after it goes live.
   const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template IN ('T2_ENDED_FREE','T3_ENDED_TOPUP') AND status<>'baseline'`)[0].n===0;
