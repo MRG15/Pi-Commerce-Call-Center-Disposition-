@@ -99,12 +99,11 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
 }
 
 // CSM, after each completed daily sync (latest snapshot `runId`):
-//   T1_RENEW         newly Expired / Cancelled, not renewed (once per lapse)
+//   T1_RENEW         Expired / Cancelled, not renewed (once per lapse; everyone already lapsed on day one too)
 //   T2/T3            ads ended or end today (latest ad end date is yesterday or today), credits ≥ / < ₹1,000
 //   T4/T5            ads end tomorrow, credits ≥ / < ₹1,000
 // Once per merchant per template and cycle (lapse date / ad end date). Merchants marked Not
-// Interested / Refund (CSM closed or onboarding lost) are left out. On the very first run, merchants
-// already lapsed are recorded as a baseline (not messaged), so only new entries trigger T1.
+// Interested / Refund (CSM closed or onboarding lost) are left out.
 export async function runCsmWaTriggers(sql:any,runId:number){
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
   const rows=await sql`
@@ -124,7 +123,6 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     )
     SELECT * FROM m WHERE NOT onb_lost AND NOT closed AND NOT COALESCE(reopened,FALSE)
   `;
-  const firstRun=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template='T1_RENEW'`)[0].n===0;
   const addDays=(d:string,n:number)=>new Date(new Date(d+'T00:00:00Z').getTime()+n*86400000).toISOString().slice(0,10);
   const ids:number[]=[];
   for(const r of rows){
@@ -132,8 +130,8 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     if(r.status==='CANCELLED'||r.status==='EXPIRED'){
       const cycle=String(r.due||r.cancelled_at||r.status);
       const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
-        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)},status:firstRun?'baseline':'queued',note:firstRun?'Already lapsed before messages started':undefined});
-      if(id&&!firstRun) ids.push(id);
+        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)},});
+      if(id) ids.push(id);
       continue;
     }
     if(!r.last_end) continue;
@@ -146,7 +144,7 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     }else if(r.last_end===addDays(today,1)&&r.active_ads>0){
       const t=free?'T4_ENDING_FREE':'T5_ENDING_TOPUP';
       const id=await queueWa(sql,{...base,template:t,dedupeKey:`ENDING|${r.customer_id}|${r.last_end}`,sourceRef:`run:${runId}`,
-        variables:{merchant_name:r.name||'',days_remaining:'1',credits:fmtMoney(r.credits??0)}});
+        variables:{merchant_name:r.name||'',ad_end_date:fmtDate(r.last_end),credits:fmtMoney(r.credits??0)}});
       if(id) ids.push(id);
     }
   }
