@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { PLANS, isPlanCode, plansRequiredOn } from '@/lib/plans';
+import { resolveUpgrade,UPGRADE_ERRORS } from '@/lib/plan-upgrade';
 
 function isCallbackLabel(v:string|null|undefined){
   const s=String(v||'').toLowerCase();
@@ -65,9 +66,18 @@ export async function POST(req: Request) {
       const today=String(dateRow.today);
       // Every sale (Payment done / Enrolled via WhatsApp) records the plan sold from 1 Oct 2026.
       const isSale=String(l1?.label||'')==='Payment done' || String(l2?.label||'')==='Enrolled via WhatsApp';
-      const planCode=isSale && planCodeRaw && isPlanCode(planCodeRaw) ? planCodeRaw : null;
+      let planCode=isSale && planCodeRaw && isPlanCode(planCodeRaw) ? planCodeRaw : null;
       if (isSale && plansRequiredOn(today) && !planCode) throw new Error('Select the plan sold (Silver, Gold or Platinum)');
-      const planAmount=planCode ? PLANS[planCode].price : null;
+      let planAmount:number|null=planCode ? PLANS[planCode].price : null;
+      // Plan Upgraded: the new plan must be higher than the merchant's current plan; the
+      // difference in price is the upgrade value counted for incentives.
+      let upgradeFrom:string|null=null, upgradeValueInr:number|null=null;
+      if (l0Code==='l0_plan_upgraded') {
+        try {
+          const u=await resolveUpgrade(tx,customerId,planCodeRaw,body.currentPlan);
+          planCode=u.to; planAmount=u.price; upgradeFrom=u.from; upgradeValueInr=u.value;
+        } catch (e:any) { throw new Error(UPGRADE_ERRORS[e?.message]||'Could not record the upgrade'); }
+      }
       const seqRows=await tx`SELECT COALESCE(max(call_seq),0)::int AS n FROM calls WHERE customer_id=${customerId} AND call_date=${today}::date`;
       const seq=Number(seqRows[0].n)+1;
       const sourceKey=`NEW|${customerId}|${Date.now()}|${crypto.randomUUID()}`;
@@ -75,11 +85,11 @@ export async function POST(req: Request) {
         INSERT INTO calls (
           customer_id,attempt_number,call_date,call_seq,event_time,agent_id,agent_name_raw,source_type,source_key,
           l0_id,l1_id,l2_id,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,facebook_page_status,
-          whatsapp_handoff,callback_at,is_legacy,is_conversion_authoritative,plan_code,plan_amount_inr
+          whatsapp_handoff,callback_at,is_legacy,is_conversion_authoritative,plan_code,plan_amount_inr,upgrade_from_plan,upgrade_value_inr
         ) VALUES (
           ${customerId},${attempt},${today}::date,${seq},now(),${String(agent.id)}::uuid,${String(agent.name)},'new_call',${sourceKey},
           ${String(l0.id)}::uuid,${l1?String(l1.id):null}::uuid,${l2?String(l2.id):null}::uuid,${String(l0.label)},${l1?String(l1.label):null},${l2?String(l2.label):null},${remark},${fb},
-          ${String(l1?.label||'')==='Taken to WhatsApp for closure'},${callbackAt},FALSE,TRUE,${planCode},${planAmount}
+          ${String(l1?.label||'')==='Taken to WhatsApp for closure'},${callbackAt},FALSE,TRUE,${planCode},${planAmount},${upgradeFrom},${upgradeValueInr}
         ) RETURNING *
       `;
       return rows[0];

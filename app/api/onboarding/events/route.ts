@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { currentUserAccess,canAccess,canManageAllOnboardingCases } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
 import { PLANS, isPlanCode, plansRequiredOn, todayIst } from '@/lib/plans';
+import { resolveUpgrade,UPGRADE_ERRORS } from '@/lib/plan-upgrade';
 
 export async function POST(req:Request){
   const user:any=await currentUserAccess();
@@ -79,6 +80,19 @@ export async function POST(req:Request){
         return;
       }
 
+      // Plan Upgraded can be logged before or after Ads Live. It is recorded on the case's timeline
+      // without changing its onboarding status; the upgrade value counts like a top-up.
+      if(l0Code==='OB_PLAN_UPGRADED'){
+        if(l1Code||l2Code) throw new Error('BAD_TAXONOMY');
+        const u=await resolveUpgrade(tx,c.customer_id,planCodeRaw,body.currentPlan);
+        await tx`
+          INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l0_label_snapshot,remark,plan_code,plan_amount_inr,upgrade_from_plan,upgrade_value_inr)
+          VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'new_event',${l0Code},${l0.label},${remark},${u.to},${u.price},${u.from},${u.value})
+        `;
+        await tx`UPDATE onboarding_cases SET last_activity_at=now(),updated_at=now() WHERE id=${caseId}::uuid`;
+        return;
+      }
+
       if(c.current_status!=='open') throw new Error('CASE_CLOSED');
       if(l0Code==='OB_IN_PROCESS' && !l1) throw new Error('L1_REQUIRED');
       if((l0Code==='OB_NOT_INTERESTED'||l0Code==='OB_REFUND_REQUESTED') && !l1) throw new Error('REASON_REQUIRED');
@@ -122,6 +136,7 @@ export async function POST(req:Request){
   }catch(e:any){
     const code=String(e?.message||'');
     const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],TECH_NOT_FOUND:['Technical case is already resolved or not found.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400],TOPUP_REQUIRED:['Enter the additional top-up amount.',400],TOPUP_ADS_LIVE_ONLY:['Additional top-up can only be logged after Ads Live.',409],CSM_ONLY:['Post-live follow-ups are logged in the CSM workspace.',403]};
+    if(UPGRADE_ERRORS[code]) return NextResponse.json({error:UPGRADE_ERRORS[code]},{status:400});
     const hit=map[code]; if(hit) return NextResponse.json({error:hit[0]},{status:hit[1]});
     console.error('onboarding event error',e);
     return NextResponse.json({error:'Could not save onboarding update.'},{status:500});

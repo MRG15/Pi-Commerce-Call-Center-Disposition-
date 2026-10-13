@@ -4,6 +4,7 @@ import { currentUserAccess } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
 import { PLANS,isPlanCode,plansRequiredOn,todayIst } from '@/lib/plans';
 import { CSM_BUCKETS,CSM_L0_CODES,csmRole } from '@/lib/csm';
+import { resolveUpgrade,UPGRADE_ERRORS } from '@/lib/plan-upgrade';
 
 // Logs a CSM call on a live merchant. Saved as a customer_success_followup onboarding event,
 // exactly like post-live follow-ups before, so CSM analytics, incentives (top-ups, renewals)
@@ -46,7 +47,10 @@ export async function POST(req:Request){
       if(l1Code==='OB_TECHNICAL'&&!l2) throw new Error('L2_REQUIRED');
       if((l1Code==='OB_OTHER_PROCESS'||l1Code==='OB_NI_OTHER'||l1Code==='OB_REFUND_OTHER'||l2Code==='OB_TECH_OTHER')&&!remark) throw new Error('REMARK_REQUIRED');
       if(l0Code==='OB_ADDITIONAL_TOPUP'&&!(topUp!==null&&Number.isFinite(topUp)&&topUp>0)) throw new Error('TOPUP_REQUIRED');
-      const planCode=l0Code==='OB_SUBS_RENEWED'&&planRaw&&isPlanCode(planRaw)?planRaw:null;
+      let planCode:string|null=l0Code==='OB_SUBS_RENEWED'&&planRaw&&isPlanCode(planRaw)?planRaw:null;
+      // Plan Upgraded: new plan must be higher than the current one; the price difference counts like a top-up.
+      let upgrade:any=null;
+      if(l0Code==='OB_PLAN_UPGRADED'){ upgrade=await resolveUpgrade(tx,customerId,planRaw,body.currentPlan); planCode=upgrade.to; }
       if(l0Code==='OB_SUBS_RENEWED'&&plansRequiredOn(todayIst())&&!planCode) throw new Error('PLAN_REQUIRED');
       const callback=toIstCallback(body.callbackDate?String(body.callbackDate):null,body.callbackTime?String(body.callbackTime):null);
       if(l1Code==='OB_CALLBACK'&&!callback) throw new Error('CALLBACK_REQUIRED');
@@ -54,9 +58,9 @@ export async function POST(req:Request){
       const att=await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${c.id}::uuid`;
       await tx`
         INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l2_code,
-          l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr,plan_code,plan_amount_inr,csm_bucket)
+          l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,callback_at,top_up_amount_inr,plan_code,plan_amount_inr,csm_bucket,upgrade_from_plan,upgrade_value_inr)
         VALUES(${c.id}::uuid,${customerId},${Number(att[0].n)},${user.id}::uuid,${user.name},'customer_success_followup',${l0Code},${l1?.code||null},${l2?.code||null},
-          ${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${l0Code==='OB_ADDITIONAL_TOPUP'?topUp:null},${planCode},${planCode?PLANS[planCode].price:null},${bucket})
+          ${l0.label},${l1?.label||null},${l2?.label||null},${remark},${callback},${l0Code==='OB_ADDITIONAL_TOPUP'?topUp:null},${planCode},${planCode?PLANS[planCode as keyof typeof PLANS].price:null},${bucket},${upgrade?.from||null},${upgrade?.value??null})
       `;
       if(l1Code==='OB_TECHNICAL'){
         const open=await tx`SELECT id FROM technical_cases WHERE onboarding_case_id=${c.id}::uuid AND status='open' LIMIT 1`;
@@ -73,6 +77,7 @@ export async function POST(req:Request){
       NOT_ASSIGNED:['This merchant is assigned to another CSM.',403],BAD_TAXONOMY:['Invalid outcome.',400],L1_REQUIRED:['Select a reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],
       L2_REQUIRED:['Select the technical issue.',400],REMARK_REQUIRED:['A remark is required for this option.',400],TOPUP_REQUIRED:['Enter the top-up amount.',400],
       PLAN_REQUIRED:['Select the plan renewed (Silver, Gold or Platinum).',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400]};
+    if(UPGRADE_ERRORS[String(e?.message||'')]) return NextResponse.json({error:UPGRADE_ERRORS[String(e?.message)]},{status:400});
     const hit=map[String(e?.message||'')]; if(hit) return NextResponse.json({error:hit[0]},{status:hit[1]});
     console.error('csm event error',e);
     return NextResponse.json({error:'Could not save the call.'},{status:500});

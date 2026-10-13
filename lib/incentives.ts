@@ -56,6 +56,49 @@ export const SALE_COUNTING_RULES:SaleCountingRule[] = [
   { from:'2026-09-21', rule:'first_payment_ever' },
 ];
 
+// Seller daily plan incentive from 1 Oct 2026 (announced 12 Oct, paid from 1 Oct), on top of the
+// weekly revenue plan. Each plan is counted on its own per seller per day: reaching `unlock`
+// sales of that plan pays `unlockPay`, each sale beyond pays `extra`. A plan upgrade counts as a
+// sale of its new plan.
+export type PlanLadder = { unlock:number; unlockPay:number; extra:number };
+export type SellerPlanDailyPlan = { from:string; to?:string; name:string; ladders:Record<'silver'|'gold'|'platinum',PlanLadder> };
+export const SELLER_PLAN_DAILY_PLANS:SellerPlanDailyPlan[] = [
+  { from:'2026-10-01', name:'Daily plan incentive', ladders:{
+    silver:{unlock:4,unlockPay:200,extra:100},
+    gold:{unlock:2,unlockPay:300,extra:200},
+    platinum:{unlock:1,unlockPay:300,extra:300},
+  } },
+];
+
+export function planLadderPay(l:PlanLadder,n:number){
+  return n<l.unlock?0:l.unlockPay+(n-l.unlock)*l.extra;
+}
+
+export type SellerPlanDailyRow = { date:string; person:string; silver:number; gold:number; platinum:number; silverPay:number; goldPay:number; platinumPay:number; plan:string; pay:number };
+
+// Daily plan incentive for sales dated in [from,to]. A sale counts only when the seller holds a
+// seller role that day (and, if given, `earns` says they are eligible).
+export function sellerPlanDailyIncentives(sales:{date:string;person:string;plan?:string|null}[],roles:SellerRoleRow[],from:string,to:string,earns?:(person:string,date:string)=>boolean):SellerPlanDailyRow[]{
+  const rows=new Map<string,SellerPlanDailyRow>();
+  for(const s of sales){
+    const plan=planOn(SELLER_PLAN_DAILY_PLANS,s.date);
+    if(!plan||s.date<from||s.date>to) continue;
+    if(s.plan!=='silver'&&s.plan!=='gold'&&s.plan!=='platinum') continue;
+    if(!roleOn(roles,s.person,s.date)) continue;
+    if(earns&&!earns(s.person,s.date)) continue;
+    const k=`${s.date}|${s.person}`;
+    const r=rows.get(k)||{date:s.date,person:s.person,silver:0,gold:0,platinum:0,silverPay:0,goldPay:0,platinumPay:0,plan:plan.name,pay:0};
+    r[s.plan]++; rows.set(k,r);
+  }
+  const out=[...rows.values()].map(r=>{
+    const plan=planOn(SELLER_PLAN_DAILY_PLANS,r.date)!;
+    const silverPay=planLadderPay(plan.ladders.silver,r.silver), goldPay=planLadderPay(plan.ladders.gold,r.gold), platinumPay=planLadderPay(plan.ladders.platinum,r.platinum);
+    return {...r,silverPay,goldPay,platinumPay,pay:silverPay+goldPay+platinumPay};
+  });
+  out.sort((a,b)=>a.date.localeCompare(b.date)||a.person.localeCompare(b.person));
+  return out;
+}
+
 // Who is on which plan, by exact agent name. Moving someone off a plan means setting `to`;
 // never delete a row, so their earlier record stays intact.
 export const SELLER_ROSTER:Membership[] = [
@@ -132,10 +175,12 @@ export function mondayOf(date:string){
   return addDays(date,-((dow+6)%7));
 }
 
-export type PaymentDoneCall = { customerId:string; date:string; seq:number; attempt:number; person:string; planAmount?:number|null };
+export type PaymentDoneCall = { customerId:string; date:string; seq:number; attempt:number; person:string; planAmount?:number|null; planCode?:string|null };
 export type Renewal = { date:string; person:string };
 export type SaleDay = { date:string; person:string; sales:number };
-export type CountedSale = { customerId:string; date:string; person:string; revenue:number };
+// `plan` is the plan sold (silver / gold / platinum) from 1 Oct 2026; a Plan Upgraded entry is a
+// sale of its new plan with revenue = the upgrade value.
+export type CountedSale = { customerId:string; date:string; person:string; revenue:number; plan?:string|null };
 
 // The Payment done calls that count as sales, each with its revenue (₹799 up to 30 Sep 2026,
 // the plan price from 1 Oct 2026).
@@ -148,7 +193,7 @@ export function countedSales(calls:PaymentDoneCall[]):CountedSale[]{
     const dayKey=`${c.customerId}|${c.date}`;
     const counts=rule==='unique_per_day'?!paidOnDay.has(dayKey):rule==='first_payment_ever'?!everPaid.has(c.customerId):false;
     everPaid.add(c.customerId); paidOnDay.add(dayKey);
-    if(counts) out.push({customerId:c.customerId,date:c.date,person:c.person,revenue:saleRevenue(c.date,c.planAmount)});
+    if(counts) out.push({customerId:c.customerId,date:c.date,person:c.person,revenue:saleRevenue(c.date,c.planAmount),plan:c.planCode??null});
   }
   return out;
 }

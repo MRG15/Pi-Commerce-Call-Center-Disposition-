@@ -13,7 +13,7 @@
 // Merchants whose onboarding case the Sub Raw sync reopened (no ad ran, or the ad failed) stay
 // with onboarding and are left out until the first ad is properly live.
 
-export const CSM_L0_CODES = ['OB_IN_PROCESS','OB_NOT_CONNECTED','OB_ADDITIONAL_TOPUP','OB_ANOTHER_AD_LIVE','OB_CREATIVE_UPDATED','OB_SUBS_RENEWED','OB_NOT_INTERESTED','OB_REFUND_REQUESTED'];
+export const CSM_L0_CODES = ['OB_IN_PROCESS','OB_NOT_CONNECTED','OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED','OB_ANOTHER_AD_LIVE','OB_CREATIVE_UPDATED','OB_SUBS_RENEWED','OB_NOT_INTERESTED','OB_REFUND_REQUESTED'];
 export const CSM_CLOSING_CODES = ['OB_NOT_INTERESTED','OB_REFUND_REQUESTED'];
 export type CsmQueue = 'ending'|'ended'|'cancelled'|'lapsed'|'onb_lost';
 export const CSM_BUCKETS = ['ending','ended','cancelled','lapsed','closed','onb_lost'];
