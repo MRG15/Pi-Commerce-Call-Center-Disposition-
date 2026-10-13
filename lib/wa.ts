@@ -60,10 +60,10 @@ const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton:string;headerImage?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
-  // Image header: the image link comes from the template's headerImage (or the message's header_media_url).
-  T1_RENEW:{name:'tone_renew_test_img',body:['merchant_name','impressions'],callbackButton:'0',headerImage:process.env.PI_WA_T1_IMAGE_URL||''},
+  // Image header: WhatsApp needs the image link with every message; it's the same image each time.
+  T1_RENEW:{name:'tone_renew_test_img',body:['merchant_name','impressions'],callbackButton:'0',headerImage:''},
 };
-export const waReady=(t:WaTemplate)=>Boolean(process.env.PI_WA_API_KEY&&WA_TEMPLATES[t]);
+export const waReady=(t:WaTemplate)=>{const x=WA_TEMPLATES[t];return Boolean(process.env.PI_WA_API_KEY&&x&&(x.headerImage===undefined||x.headerImage));};
 // Test mode: when PI_WA_TEST_CUSTOMERS is set (comma-separated customer IDs), only those merchants
 // get messages; everyone else is skipped.
 const testCustomers=()=>(process.env.PI_WA_TEST_CUSTOMERS||'').split(',').map(x=>x.trim()).filter(Boolean);
@@ -136,9 +136,10 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
 // (lapse date / ad end date). Merchants marked Not Interested / Refund (CSM closed or onboarding
 // lost) are left out. Nothing is recorded until the CSM templates are configured, so day one starts
 // when sending actually can.
-// CSM messages go out automatically after each daily sync only once this is switched on (after
-// the T1–T5 templates are tested). Until then they can be tried from Super Admin → WhatsApp test.
-export const CSM_AUTO_SEND=false;
+// CSM messages go out automatically for every template that is configured (T1 once its header
+// image link is set). Each snapshot is processed right after the daily sync, and again the first
+// time the CSM workspace is opened after a template goes live mid-day (see ensureCsmWaRun).
+export const CSM_AUTO_SEND=true;
 export async function runCsmWaTriggers(sql:any,runId:number){
   if(!CSM_AUTO_SEND) return {queued:0,note:'CSM automatic sending is off'};
   const ready={T1:waReady('T1_RENEW'),ENDED:waReady('T2_ENDED_FREE')&&waReady('T3_ENDED_TOPUP'),ENDING:waReady('T4_ENDING_FREE')&&waReady('T5_ENDING_TOPUP')};
@@ -193,6 +194,20 @@ export async function runCsmWaTriggers(sql:any,runId:number){
   }
   await sendQueuedWa(sql,ids);
   return {queued:ids.length};
+}
+
+// Runs the live CSM templates on the latest snapshot unless that snapshot was already processed with
+// the same set of live templates. Adding a template later processes it again; the once-per-cycle
+// keys stop anyone getting the same message twice.
+export async function ensureCsmWaRun(sql:any){
+  const live=(['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'] as WaTemplate[]).filter(waReady).join(',');
+  if(!CSM_AUTO_SEND||!live) return;
+  const claim=await sql`
+    UPDATE csm_sync_runs SET wa_templates=${live}
+    WHERE id=(SELECT max(id) FROM csm_sync_runs WHERE status='complete') AND wa_templates IS DISTINCT FROM ${live}
+    RETURNING id
+  `;
+  if(claim[0]) await runCsmWaTriggers(sql,Number(claim[0].id));
 }
 
 // A new disposition by the workspace clears that merchant's open callback requests there.
