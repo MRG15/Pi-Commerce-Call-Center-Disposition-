@@ -98,13 +98,19 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
   if(id) await sendQueuedWa(sql,[id]);
 }
 
-// CSM, after each completed daily sync (latest snapshot `runId`):
-//   T1_RENEW         Expired / Cancelled, not renewed (once per lapse; everyone already lapsed on day one too)
-//   T2/T3            ads ended or end today (latest ad end date is yesterday or today), credits ≥ / < ₹1,000
+// CSM, after each completed daily sync (latest snapshot `runId`), for merchants in the CSM panel:
+//   T1_RENEW         Expired / Cancelled, not renewed (once per lapse)
+//   T2/T3            ads ended (latest ad end date is today or yesterday), credits ≥ / < ₹1,000
 //   T4/T5            ads end tomorrow, credits ≥ / < ₹1,000
-// Once per merchant per template and cycle (lapse date / ad end date). Merchants marked Not
-// Interested / Refund (CSM closed or onboarding lost) are left out.
+// Day one (the first sync once the CSM endpoints are set) messages everyone who qualifies, ads that
+// ended earlier included; after that only new entries. Once per merchant per template and cycle
+// (lapse date / ad end date). Merchants marked Not Interested / Refund (CSM closed or onboarding
+// lost) are left out. Nothing is recorded until the CSM endpoints are configured, so day one starts
+// when sending actually can.
 export async function runCsmWaTriggers(sql:any,runId:number){
+  let config:any={};
+  try{config=JSON.parse(process.env.PI_WA_ENDPOINTS||'{}');}catch{}
+  if(!['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'].some(t=>config[t]?.url)) return {queued:0,note:'CSM endpoints not configured'};
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
   const rows=await sql`
     WITH m AS (
@@ -119,10 +125,11 @@ export async function runCsmWaTriggers(sql:any,runId:number){
       LEFT JOIN (SELECT customer_id,sum(impressions)::float8 AS impressions,max(end_date) AS last_end,count(*) FILTER (WHERE ad_status='ACTIVE')::int AS active_ads,
                    max(merchant_name) AS name,max(phone_number) AS phone FROM merchant_ads WHERE sync_run_id=${runId} GROUP BY customer_id) a ON a.customer_id=s.customer_id
       LEFT JOIN LATERAL (SELECT current_status,reopen_reason FROM onboarding_cases WHERE customer_id=s.customer_id ORDER BY created_at LIMIT 1) c ON TRUE
-      WHERE s.sync_run_id=${runId}
+      WHERE s.sync_run_id=${runId} AND (a.customer_id IS NOT NULL OR COALESCE(s.completed_ads_count,0)>0)
     )
     SELECT * FROM m WHERE NOT onb_lost AND NOT closed AND NOT COALESCE(reopened,FALSE)
   `;
+  const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE workspace='csm' AND status<>'baseline'`)[0].n===0;
   const addDays=(d:string,n:number)=>new Date(new Date(d+'T00:00:00Z').getTime()+n*86400000).toISOString().slice(0,10);
   const ids:number[]=[];
   for(const r of rows){
@@ -130,13 +137,13 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     if(r.status==='CANCELLED'||r.status==='EXPIRED'){
       const cycle=String(r.due||r.cancelled_at||r.status);
       const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
-        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)},});
+        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)}});
       if(id) ids.push(id);
       continue;
     }
     if(!r.last_end) continue;
     const free=Number(r.credits||0)>=1000;
-    if(r.last_end===today||r.last_end===addDays(today,-1)){
+    if(r.last_end<=today&&(dayOne||r.last_end>=addDays(today,-1))){
       const t=free?'T2_ENDED_FREE':'T3_ENDED_TOPUP';
       const id=await queueWa(sql,{...base,template:t,dedupeKey:`ENDED|${r.customer_id}|${r.last_end}`,sourceRef:`run:${runId}`,
         variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)}});
