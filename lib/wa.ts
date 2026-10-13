@@ -60,7 +60,9 @@ const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
-  // T1_RENEW: added once its final template (curl) is shared; until then no CSM message is sent.
+  T1_RENEW:{name:'tone_renew_test_f',body:['merchant_name','impressions'],callbackButton:'0'},
+  // T4 goes live together with T5 (same merchants, split by credits); until T5 is added it is not sent.
+  T4_ENDING_FREE:{name:'tfour_ending_free_test_f',body:['merchant_name','ad_end_date','credits'],callbackButton:'0'},
 };
 export const waReady=(t:WaTemplate)=>{const x=WA_TEMPLATES[t];return Boolean(process.env.PI_WA_API_KEY&&x&&(x.headerImage===undefined||x.headerImage));};
 // Test mode: when PI_WA_TEST_CUSTOMERS is set (comma-separated customer IDs), only those merchants
