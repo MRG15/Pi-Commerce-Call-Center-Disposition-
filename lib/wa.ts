@@ -52,21 +52,45 @@ export async function queueWa(sql:any,m:QueueInput){
   return rows[0]?.id?Number(rows[0].id):null;
 }
 
-// Sends queued messages. The platform endpoint per template comes from PI_WA_ENDPOINTS
-// (JSON: {"<TEMPLATE>":{"url":"…","headers":{…}}}). Until it is configured, messages stay queued.
+// Pi Commerce WhatsApp send API. Each portal template maps to the platform template name, the
+// order of its body variables ({{1}}, {{2}}, …) and the index of its "Request a callback" URL
+// button. A template without an entry here is not sent (its messages stay queued).
+const WA_API_URL=process.env.PI_WA_URL||'https://pi-commerce-bff.paytm.com/api/pi-commerce/v1/messages/whatsapp/send';
+const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
+export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton:string}>>={
+  SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
+};
+export const waReady=(t:WaTemplate)=>Boolean(process.env.PI_WA_API_KEY&&WA_TEMPLATES[t]);
+// Test mode: when PI_WA_TEST_CUSTOMERS is set (comma-separated customer IDs), only those merchants
+// get messages; everyone else is skipped.
+const testCustomers=()=>(process.env.PI_WA_TEST_CUSTOMERS||'').split(',').map(x=>x.trim()).filter(Boolean);
+// "9876543210" / "919876543210" / "+91 98765 43210" → "+919876543210".
+export function waPhone(raw:any){
+  const d=String(raw||'').replace(/\D/g,'');
+  if(d.length===10) return '+91'+d;
+  if(d.length===12&&d.startsWith('91')) return '+'+d;
+  if(d.length===11&&d.startsWith('0')) return '+91'+d.slice(1);
+  return d.length>=10?'+'+d:'';
+}
+
 export async function sendQueuedWa(sql:any,ids:number[]){
   if(!ids.length) return;
-  let config:any={};
-  try{config=JSON.parse(process.env.PI_WA_ENDPOINTS||'{}');}catch{}
-  const rows=await sql`SELECT id,template,phone,variables FROM wa_messages WHERE id=ANY(${ids}) AND status='queued'`;
+  const rows=await sql`SELECT id,template,customer_id,phone,variables FROM wa_messages WHERE id=ANY(${ids}) AND status='queued'`;
+  const test=testCustomers();
   for(const m of rows){
-    const ep=config[m.template];
-    if(!ep?.url){await sql`UPDATE wa_messages SET status_note='Waiting for platform endpoint' WHERE id=${m.id}`;continue;}
-    if(!m.phone){await sql`UPDATE wa_messages SET status='skipped',status_note='No phone number' WHERE id=${m.id}`;continue;}
+    const t=WA_TEMPLATES[m.template as WaTemplate];
+    if(!t||!process.env.PI_WA_API_KEY){await sql`UPDATE wa_messages SET status_note='Waiting for platform template' WHERE id=${m.id}`;continue;}
+    if(test.length&&!test.includes(String(m.customer_id))){await sql`UPDATE wa_messages SET status='skipped',status_note='Test mode: not a test merchant' WHERE id=${m.id}`;continue;}
+    const to=waPhone(m.phone);
+    if(!to){await sql`UPDATE wa_messages SET status='skipped',status_note='No phone number' WHERE id=${m.id}`;continue;}
+    const v=m.variables||{};
+    const body=Object.fromEntries(t.body.map((k,i)=>[String(i+1),String(v[k]??'')]));
+    const payload={template_name:t.name,language:{code:'en_US',policy:'deterministic'},from:WA_FROM,default_country:'IN',
+      recipients:[{to,variables:{body,buttons:{[t.callbackButton]:{'1':String(v.callback_token||'')}}}}]};
     try{
-      const res=await fetch(ep.url,{method:'POST',headers:{'content-type':'application/json',...(ep.headers||{})},body:JSON.stringify({phone:m.phone,...m.variables})});
+      const res=await fetch(WA_API_URL,{method:'POST',headers:{'X-API-Key':process.env.PI_WA_API_KEY!,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const text=(await res.text()).slice(0,500);
-      if(res.ok) await sql`UPDATE wa_messages SET status='sent',sent_at=now(),attempts=attempts+1,status_note=${text} WHERE id=${m.id}`;
+      if(res.ok) await sql`UPDATE wa_messages SET status='sent',sent_at=now(),phone=${to},attempts=attempts+1,status_note=${text} WHERE id=${m.id}`;
       else await sql`UPDATE wa_messages SET status='failed',attempts=attempts+1,status_note=${`HTTP ${res.status}: ${text}`} WHERE id=${m.id}`;
     }catch(e:any){
       await sql`UPDATE wa_messages SET status='failed',attempts=attempts+1,status_note=${String(e?.message||e).slice(0,500)} WHERE id=${m.id}`;
@@ -102,15 +126,13 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
 //   T1_RENEW         Expired / Cancelled, not renewed (once per lapse)
 //   T2/T3            ads ended (latest ad end date is today or yesterday), credits ≥ / < ₹1,000
 //   T4/T5            ads end tomorrow, credits ≥ / < ₹1,000
-// Day one (the first sync once the CSM endpoints are set) messages everyone who qualifies, ads that
+// Day one (the first sync once the CSM templates are set) messages everyone who qualifies, ads that
 // ended earlier included; after that only new entries. Once per merchant per template and cycle
 // (lapse date / ad end date). Merchants marked Not Interested / Refund (CSM closed or onboarding
-// lost) are left out. Nothing is recorded until the CSM endpoints are configured, so day one starts
+// lost) are left out. Nothing is recorded until the CSM templates are configured, so day one starts
 // when sending actually can.
 export async function runCsmWaTriggers(sql:any,runId:number){
-  let config:any={};
-  try{config=JSON.parse(process.env.PI_WA_ENDPOINTS||'{}');}catch{}
-  if(!['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'].some(t=>config[t]?.url)) return {queued:0,note:'CSM endpoints not configured'};
+  if(!(['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'] as WaTemplate[]).some(waReady)) return {queued:0,note:'CSM templates not configured'};
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
   const rows=await sql`
     WITH m AS (

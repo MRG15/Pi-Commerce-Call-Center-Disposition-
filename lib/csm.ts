@@ -74,8 +74,8 @@ export async function csmMerchants(sql:any,runId:number){
       FROM cs GROUP BY customer_id
     ), money AS (
       SELECT e.customer_id,
-        count(*) FILTER (WHERE e.l0_code='OB_ADDITIONAL_TOPUP' AND e.top_up_amount_inr>0)::int AS topups,
-        COALESCE(sum(e.top_up_amount_inr) FILTER (WHERE e.l0_code='OB_ADDITIONAL_TOPUP'),0)::float8 AS topup_total,
+        count(*) FILTER (WHERE (e.l0_code='OB_ADDITIONAL_TOPUP' AND e.top_up_amount_inr>0) OR (e.l0_code='OB_PLAN_UPGRADED' AND e.upgrade_value_inr>0))::int AS topups,
+        COALESCE(sum(COALESCE(e.top_up_amount_inr,e.upgrade_value_inr)) FILTER (WHERE e.l0_code IN ('OB_ADDITIONAL_TOPUP','OB_PLAN_UPGRADED')),0)::float8 AS topup_total,
         count(*) FILTER (WHERE e.l0_code='OB_SUBS_RENEWED')::int AS renewals,
         (array_agg(e.plan_code ORDER BY e.event_time DESC) FILTER (WHERE e.l0_code='OB_SUBS_RENEWED'))[1] AS last_renewal_plan
       FROM onboarding_events e WHERE e.customer_id IN (SELECT customer_id FROM base)
