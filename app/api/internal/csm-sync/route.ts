@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'crypto';
 import { NextResponse,after } from 'next/server';
-import { runCsmWaTriggers } from '@/lib/wa';
+import { ensureCsmWaRun } from '@/lib/wa';
 import { db } from '@/lib/db';
 import { allocateUnassigned } from '@/lib/csm';
 
@@ -106,7 +106,7 @@ export async function POST(req:Request){
     try{await sql`ANALYZE merchant_subscriptions`;await sql`ANALYZE merchant_ads`;}catch{}
     const allocation=await allocateUnassigned(sql,runId);
     // CSM WhatsApp nudges (T1–T5) from the fresh snapshot, after the response.
-    after(async()=>{try{await runCsmWaTriggers(sql,runId);}catch(e){console.error('csm whatsapp error',e);}});
+    after(async()=>{try{await ensureCsmWaRun(sql);}catch(e){console.error('csm whatsapp error',e);}});
     return NextResponse.json({ok:true,runId,subscriptions:subs,ads,newlyAssigned:allocation.assigned});
   }
 

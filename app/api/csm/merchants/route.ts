@@ -1,7 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextResponse,after } from 'next/server';
 import { db } from '@/lib/db';
 import { currentUserAccess } from '@/lib/workspace-access';
 import { csmMerchants,csmRole,latestCompleteRun,sortQueue } from '@/lib/csm';
+import { ensureCsmWaRun } from '@/lib/wa';
 
 // The CSM queues. Agents see the merchants assigned to them; admins see everyone's.
 export async function GET(){
@@ -11,6 +12,8 @@ export async function GET(){
   if(!role) return NextResponse.json({error:'CSM access required'},{status:403});
   const sql=db();
   const run=await latestCompleteRun(sql);
+  // CSM WhatsApp templates that went live since the last sync run on today's snapshot (once).
+  after(async()=>{try{await ensureCsmWaRun(sql);}catch(e){console.error('csm whatsapp error',e);}});
   const csms=await sql`
     SELECT a.id,a.name,wa.access_level,COALESCE(w.weight,0) AS weight
     FROM agents a JOIN workspace_access wa ON wa.agent_id=a.id AND wa.workspace='csm'

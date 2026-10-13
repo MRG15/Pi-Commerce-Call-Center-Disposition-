@@ -1,6 +1,6 @@
 'use client';
 import UpgradePicker from './UpgradePicker';
-import CallbackRequestList,{useCallbackRequests} from './CallbackRequests';
+import CallbackRequestList,{useCallbackRequests,refreshCallbackRequests} from './CallbackRequests';
 import { useEffect,useMemo,useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
@@ -187,7 +187,7 @@ function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node
       bucket:row?(row.closed?'closed':row.queue):null})});
     const j=await r.json(); setSaving(false);
     if(!r.ok){setErr(j.error||'Could not save');return;}
-    setMsg('Call logged.'); await onSaved();
+    setMsg('Call logged.'); refreshCallbackRequests(); await onSaved();
   }
   async function addNote(){
     setSaving(true);setErr('');

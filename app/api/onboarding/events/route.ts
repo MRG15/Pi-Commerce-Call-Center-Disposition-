@@ -133,10 +133,10 @@ export async function POST(req:Request){
         await tx`UPDATE technical_cases SET status='resolved',resolved_by=${user.id}::uuid,resolved_at=now(),latest_remark=COALESCE(${remark},latest_remark),updated_at=now() WHERE id=${resolveTechId}::uuid AND onboarding_case_id=${caseId}::uuid AND status='open'`;
       }
     });
+    try{const cs=await sql`SELECT customer_id FROM onboarding_cases WHERE id=${caseId}::uuid`;if(cs[0]) await resolveCallbackRequests(sql,'onboarding',cs[0].customer_id);}
+    catch(e){console.error('onboarding callback resolve error',e);}
     after(async()=>{
       try{
-        const cs=await sql`SELECT customer_id FROM onboarding_cases WHERE id=${caseId}::uuid`;
-        if(cs[0]) await resolveCallbackRequests(sql,'onboarding',cs[0].customer_id);
         if(l0Code==='OB_NOT_CONNECTED') await triggerOnboardingWa(sql,caseId,String(user.id),`case:${caseId}`);
       }catch(e){console.error('onboarding whatsapp error',e);}
     });

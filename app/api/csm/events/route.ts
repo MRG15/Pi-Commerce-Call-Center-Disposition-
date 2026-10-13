@@ -1,4 +1,4 @@
-import { NextResponse,after } from 'next/server';
+import { NextResponse } from 'next/server';
 import { resolveCallbackRequests } from '@/lib/wa';
 import { db } from '@/lib/db';
 import { currentUserAccess } from '@/lib/workspace-access';
@@ -72,7 +72,7 @@ export async function POST(req:Request){
         `;
       }
     });
-    after(async()=>{try{await resolveCallbackRequests(sql,'csm',customerId);}catch(e){console.error('csm callback resolve error',e);}});
+    try{await resolveCallbackRequests(sql,'csm',customerId);}catch(e){console.error('csm callback resolve error',e);}
     return NextResponse.json({ok:true});
   }catch(e:any){
     const map:any={NO_CASE:['This merchant has no onboarding case yet, so a call cannot be logged.',409],
