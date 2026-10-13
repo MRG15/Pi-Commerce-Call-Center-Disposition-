@@ -95,11 +95,11 @@ export async function POST(req: Request) {
       `;
       return rows[0];
     });
-    // WhatsApp nudge for Voicemail / Disconnected / Not Connected, and clearing this merchant's
-    // open callback requests, run after the response so the save is never slowed down.
+    // Clear this merchant's open callback requests now, so the pane updates as soon as the save
+    // returns. The WhatsApp nudge runs after the response so the save is never slowed down.
+    try{await resolveCallbackRequests(sql,'seller',customerId);}catch(e){console.error('seller callback resolve error',e);}
     after(async()=>{
       try{
-        await resolveCallbackRequests(sql,'seller',customerId);
         if(SELLER_WA_L0.includes(l0Code)) await triggerSellerWa(sql,customerId,String(agent.id),String(result.id));
       }catch(e){console.error('seller whatsapp error',e);}
     });
