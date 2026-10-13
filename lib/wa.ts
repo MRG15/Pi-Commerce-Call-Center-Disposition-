@@ -1,0 +1,160 @@
+// WhatsApp nudges through the Pi Commerce platform and the "Request a callback" link.
+// Every message is logged in wa_messages with a unique token; the template's URL button points
+// to /cb/<token>. Merchants a CSM or onboarding marked Not Interested / Refund get nothing.
+import { randomBytes } from 'crypto';
+import { currentPlanOf } from './plan-upgrade';
+import { planLabel } from './plans';
+
+export type WaTemplate='SELLER_NOT_CONNECTED'|'ONB_NOT_CONNECTED'|'T1_RENEW'|'T2_ENDED_FREE'|'T3_ENDED_TOPUP'|'T4_ENDING_FREE'|'T5_ENDING_TOPUP';
+export type WaWorkspace='seller'|'onboarding'|'csm';
+export const SELLER_WA_L0=['l0_voicemail','l0_disconnected','l0_not_connected'];
+// Credits a plan starts with, for onboarding messages sent before Sub Raw has the merchant.
+export const PLAN_START_CREDITS:Record<string,number>={silver:2000,gold:5500,platinum:11000};
+
+export const fmtDate=(d:any)=>{if(!d)return '';const t=new Date(String(d).slice(0,10)+'T00:00:00');return isNaN(t.getTime())?'':t.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});};
+export const fmtMoney=(n:any)=>n==null||n===''?'':'₹'+Math.round(Number(n)).toLocaleString('en-IN');
+export const fmtCount=(n:any)=>n==null||n===''?'':Math.round(Number(n)).toLocaleString('en-IN');
+const newToken=()=>randomBytes(12).toString('base64url');
+
+export async function merchantContact(sql:any,customerId:string){
+  const rows=await sql`
+    SELECT COALESCE(NULLIF(mi.merchant_name,''),NULLIF(c.merchant_name,''),s.merchant_name) AS name,
+           COALESCE(NULLIF(mi.phone_number,''),NULLIF(c.phone,''),s.phone_number) AS phone
+    FROM (SELECT ${customerId}::text AS customer_id) k
+    LEFT JOIN merchant_information mi ON mi.customer_id=k.customer_id
+    LEFT JOIN customers c ON c.customer_id=k.customer_id
+    LEFT JOIN LATERAL (SELECT merchant_name,phone_number FROM merchant_subscriptions WHERE customer_id=k.customer_id ORDER BY sync_run_id DESC LIMIT 1) s ON TRUE
+  `;
+  return {name:rows[0]?.name||'',phone:rows[0]?.phone||''};
+}
+
+// Not Interested / Refund: onboarding case Lost, or the latest CSM call is NI / Refund.
+export async function waSuppressed(sql:any,customerId:string){
+  const rows=await sql`
+    SELECT EXISTS(SELECT 1 FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='lost')
+        OR COALESCE((SELECT l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') FROM onboarding_events
+                     WHERE customer_id=${customerId} AND source_type='customer_success_followup'
+                     ORDER BY event_time DESC,attempt_number DESC LIMIT 1),FALSE) AS suppressed
+  `;
+  return Boolean(rows[0]?.suppressed);
+}
+
+type QueueInput={template:WaTemplate;workspace:WaWorkspace;customerId:string;phone?:string|null;agentId?:string|null;sourceRef?:string|null;dedupeKey?:string|null;variables:Record<string,string>;status?:'queued'|'baseline'|'skipped';note?:string};
+export async function queueWa(sql:any,m:QueueInput){
+  const token=newToken();
+  const rows=await sql`
+    INSERT INTO wa_messages(token,template,workspace,customer_id,phone,agent_id,source_ref,dedupe_key,variables,status,status_note)
+    VALUES(${token},${m.template},${m.workspace},${m.customerId},${m.phone||null},${m.agentId||null},${m.sourceRef||null},${m.dedupeKey||null},
+      ${sql.json({...m.variables,callback_token:token})},${m.status||'queued'},${m.note||null})
+    ON CONFLICT (dedupe_key) DO NOTHING
+    RETURNING id
+  `;
+  return rows[0]?.id?Number(rows[0].id):null;
+}
+
+// Sends queued messages. The platform endpoint per template comes from PI_WA_ENDPOINTS
+// (JSON: {"<TEMPLATE>":{"url":"…","headers":{…}}}). Until it is configured, messages stay queued.
+export async function sendQueuedWa(sql:any,ids:number[]){
+  if(!ids.length) return;
+  let config:any={};
+  try{config=JSON.parse(process.env.PI_WA_ENDPOINTS||'{}');}catch{}
+  const rows=await sql`SELECT id,template,phone,variables FROM wa_messages WHERE id=ANY(${ids}) AND status='queued'`;
+  for(const m of rows){
+    const ep=config[m.template];
+    if(!ep?.url){await sql`UPDATE wa_messages SET status_note='Waiting for platform endpoint' WHERE id=${m.id}`;continue;}
+    if(!m.phone){await sql`UPDATE wa_messages SET status='skipped',status_note='No phone number' WHERE id=${m.id}`;continue;}
+    try{
+      const res=await fetch(ep.url,{method:'POST',headers:{'content-type':'application/json',...(ep.headers||{})},body:JSON.stringify({phone:m.phone,...m.variables})});
+      const text=(await res.text()).slice(0,500);
+      if(res.ok) await sql`UPDATE wa_messages SET status='sent',sent_at=now(),attempts=attempts+1,status_note=${text} WHERE id=${m.id}`;
+      else await sql`UPDATE wa_messages SET status='failed',attempts=attempts+1,status_note=${`HTTP ${res.status}: ${text}`} WHERE id=${m.id}`;
+    }catch(e:any){
+      await sql`UPDATE wa_messages SET status='failed',attempts=attempts+1,status_note=${String(e?.message||e).slice(0,500)} WHERE id=${m.id}`;
+    }
+  }
+}
+
+// Seller: Voicemail / Disconnected / Not Connected.
+export async function triggerSellerWa(sql:any,customerId:string,agentId:string,callId:string){
+  if(await waSuppressed(sql,customerId)) return;
+  const c=await merchantContact(sql,customerId);
+  const id=await queueWa(sql,{template:'SELLER_NOT_CONNECTED',workspace:'seller',customerId,phone:c.phone,agentId,sourceRef:`call:${callId}`,variables:{merchant_name:c.name}});
+  if(id) await sendQueuedWa(sql,[id]);
+}
+
+// Onboarding: Not Connected. Plan / purchase date / expiry / credits from the case (Sub Raw),
+// falling back to the plan sold and its starting credits for merchants Sub Raw has not seen yet.
+export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,eventRef:string){
+  const cs=await sql`SELECT customer_id,sale_date::text AS sale_date,sub_plan_name,sub_expiry_date::text AS expiry,sub_credits::float8 AS credits FROM onboarding_cases WHERE id=${caseId}::uuid`;
+  const k=cs[0]; if(!k) return;
+  if(await waSuppressed(sql,k.customer_id)) return;
+  const c=await merchantContact(sql,k.customer_id);
+  const cur=await currentPlanOf(sql,k.customer_id);
+  const planName=k.sub_plan_name||(cur.plan?planLabel(cur.plan):'');
+  const expiry=k.expiry||(k.sale_date?new Date(new Date(k.sale_date+'T00:00:00Z').getTime()+30*86400000).toISOString().slice(0,10):null);
+  const credits=k.credits??(cur.plan&&cur.plan!=='legacy'?PLAN_START_CREDITS[cur.plan]:null);
+  const id=await queueWa(sql,{template:'ONB_NOT_CONNECTED',workspace:'onboarding',customerId:k.customer_id,phone:c.phone,agentId,sourceRef:eventRef,
+    variables:{merchant_name:c.name,plan_name:planName,purchase_date:fmtDate(k.sale_date),expiry_date:fmtDate(expiry),credits:fmtMoney(credits)}});
+  if(id) await sendQueuedWa(sql,[id]);
+}
+
+// CSM, after each completed daily sync (latest snapshot `runId`):
+//   T1_RENEW         newly Expired / Cancelled, not renewed (once per lapse)
+//   T2/T3            ads ended or end today (latest ad end date is yesterday or today), credits ≥ / < ₹1,000
+//   T4/T5            ads end tomorrow, credits ≥ / < ₹1,000
+// Once per merchant per template and cycle (lapse date / ad end date). Merchants marked Not
+// Interested / Refund (CSM closed or onboarding lost) are left out. On the very first run, merchants
+// already lapsed are recorded as a baseline (not messaged), so only new entries trigger T1.
+export async function runCsmWaTriggers(sql:any,runId:number){
+  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
+  const rows=await sql`
+    WITH m AS (
+      SELECT s.customer_id,s.status,s.cancelled_at,s.expected_renewal_due_date::text AS due,s.wallet_balance::float8 AS credits,
+        COALESCE(NULLIF(s.merchant_name,''),a.name) AS name,COALESCE(NULLIF(s.phone_number,''),a.phone) AS phone,
+        a.impressions,a.last_end::text AS last_end,a.active_ads,
+        (c.current_status='lost') AS onb_lost,
+        COALESCE((SELECT e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') FROM onboarding_events e
+          WHERE e.customer_id=s.customer_id AND e.source_type='customer_success_followup' ORDER BY e.event_time DESC,e.attempt_number DESC LIMIT 1),FALSE) AS closed,
+        (c.current_status='open' AND c.reopen_reason IS NOT NULL) AS reopened
+      FROM merchant_subscriptions s
+      LEFT JOIN (SELECT customer_id,sum(impressions)::float8 AS impressions,max(end_date) AS last_end,count(*) FILTER (WHERE ad_status='ACTIVE')::int AS active_ads,
+                   max(merchant_name) AS name,max(phone_number) AS phone FROM merchant_ads WHERE sync_run_id=${runId} GROUP BY customer_id) a ON a.customer_id=s.customer_id
+      LEFT JOIN LATERAL (SELECT current_status,reopen_reason FROM onboarding_cases WHERE customer_id=s.customer_id ORDER BY created_at LIMIT 1) c ON TRUE
+      WHERE s.sync_run_id=${runId}
+    )
+    SELECT * FROM m WHERE NOT onb_lost AND NOT closed AND NOT COALESCE(reopened,FALSE)
+  `;
+  const firstRun=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template='T1_RENEW'`)[0].n===0;
+  const addDays=(d:string,n:number)=>new Date(new Date(d+'T00:00:00Z').getTime()+n*86400000).toISOString().slice(0,10);
+  const ids:number[]=[];
+  for(const r of rows){
+    const base={workspace:'csm' as const,customerId:String(r.customer_id),phone:r.phone};
+    if(r.status==='CANCELLED'||r.status==='EXPIRED'){
+      const cycle=String(r.due||r.cancelled_at||r.status);
+      const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
+        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)},status:firstRun?'baseline':'queued',note:firstRun?'Already lapsed before messages started':undefined});
+      if(id&&!firstRun) ids.push(id);
+      continue;
+    }
+    if(!r.last_end) continue;
+    const free=Number(r.credits||0)>=1000;
+    if(r.last_end===today||r.last_end===addDays(today,-1)){
+      const t=free?'T2_ENDED_FREE':'T3_ENDED_TOPUP';
+      const id=await queueWa(sql,{...base,template:t,dedupeKey:`ENDED|${r.customer_id}|${r.last_end}`,sourceRef:`run:${runId}`,
+        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)}});
+      if(id) ids.push(id);
+    }else if(r.last_end===addDays(today,1)&&r.active_ads>0){
+      const t=free?'T4_ENDING_FREE':'T5_ENDING_TOPUP';
+      const id=await queueWa(sql,{...base,template:t,dedupeKey:`ENDING|${r.customer_id}|${r.last_end}`,sourceRef:`run:${runId}`,
+        variables:{merchant_name:r.name||'',days_remaining:'1',credits:fmtMoney(r.credits??0)}});
+      if(id) ids.push(id);
+    }
+  }
+  await sendQueuedWa(sql,ids);
+  return {queued:ids.length};
+}
+
+// A new disposition by the workspace clears that merchant's open callback requests there.
+export async function resolveCallbackRequests(sql:any,workspace:WaWorkspace,customerId:string){
+  await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND customer_id=${customerId} AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
+}

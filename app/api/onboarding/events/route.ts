@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextResponse,after } from 'next/server';
+import { triggerOnboardingWa,resolveCallbackRequests } from '@/lib/wa';
 import { db } from '@/lib/db';
 import { currentUserAccess,canAccess,canManageAllOnboardingCases } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
@@ -131,6 +132,13 @@ export async function POST(req:Request){
       if(resolveTechId){
         await tx`UPDATE technical_cases SET status='resolved',resolved_by=${user.id}::uuid,resolved_at=now(),latest_remark=COALESCE(${remark},latest_remark),updated_at=now() WHERE id=${resolveTechId}::uuid AND onboarding_case_id=${caseId}::uuid AND status='open'`;
       }
+    });
+    after(async()=>{
+      try{
+        const cs=await sql`SELECT customer_id FROM onboarding_cases WHERE id=${caseId}::uuid`;
+        if(cs[0]) await resolveCallbackRequests(sql,'onboarding',cs[0].customer_id);
+        if(l0Code==='OB_NOT_CONNECTED') await triggerOnboardingWa(sql,caseId,String(user.id),`case:${caseId}`);
+      }catch(e){console.error('onboarding whatsapp error',e);}
     });
     return NextResponse.json({ok:true});
   }catch(e:any){
