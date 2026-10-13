@@ -59,6 +59,7 @@ const WA_API_URL=process.env.PI_WA_URL||'https://pi-commerce-bff.paytm.com/api/p
 const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
+  ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
 };
 export const waReady=(t:WaTemplate)=>Boolean(process.env.PI_WA_API_KEY&&WA_TEMPLATES[t]);
 // Test mode: when PI_WA_TEST_CUSTOMERS is set (comma-separated customer IDs), only those merchants
