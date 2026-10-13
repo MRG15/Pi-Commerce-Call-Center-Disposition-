@@ -51,8 +51,9 @@ export async function GET(req:Request){
   const run=await latestCompleteRun(sql);
   let coverage:any[]=[];
   const bucketNow=new Map<string,any>();
+  const merchants:any[]=run?await csmMerchants(sql,run.id):[];
   if(run){
-    const rows=await csmMerchants(sql,run.id);
+    const rows=merchants;
     const since=Date.now()-7*86400000;
     const groups=new Map<string,any>();
     for(const m of rows as any[]){
@@ -75,7 +76,7 @@ export async function GET(req:Request){
   // Each call counts under the merchant's current bucket, so the numbers move with the merchant.
   // (The bucket at call time is stored too; it is only used if the merchant has left the queues.)
   const currentBucket=new Map<string,string>();
-  if(run) for(const m of await csmMerchants(sql,run.id) as any[]) currentBucket.set(String(m.customer_id),m.closed?'closed':m.queue);
+  for(const m of merchants) currentBucket.set(String(m.customer_id),m.closed?'closed':m.queue);
   const called=new Map<string,any>(); const seen=new Map<string,Set<string>>();
   for(const e of bucketCalls as any[]){
     const k=currentBucket.get(String(e.customer_id))||e.csm_bucket||'untagged';

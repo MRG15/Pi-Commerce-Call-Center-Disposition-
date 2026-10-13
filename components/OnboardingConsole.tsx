@@ -59,18 +59,21 @@ export default function OnboardingConsole(){
  // refresh: the current view is reloaded quietly every 30 seconds while the tab is open, and
  // when the tab comes back into focus. The open case and filters stay as they are.
  const viewRef=useRef({viewPeriod:'all',viewAgent:'',viewFrom:'',viewTo:''}); // last applied view
+ const versionRef=useRef<string>('');
  useEffect(()=>{
-   const refresh=()=>{
+   const refresh=async()=>{
      if(document.visibilityState!=='visible')return;
+     // Only re-download the case list when something changed.
+     try{const r=await fetch('/api/onboarding/cases/version',{cache:'no-store'});if(r.ok){const {v:ver}=await r.json();if(ver&&ver===versionRef.current)return;versionRef.current=ver;}}catch{}
      const v=viewRef.current;
      if(v.viewPeriod==='today')loadCases({from:today,to:today,agent:v.viewAgent});
      else if(v.viewPeriod==='yesterday')loadCases({from:yesterday,to:yesterday,agent:v.viewAgent});
      else if(v.viewPeriod==='custom'&&v.viewFrom&&v.viewTo)loadCases({from:v.viewFrom,to:v.viewTo,agent:v.viewAgent});
      else loadCases({agent:v.viewAgent});
    };
-   const t=setInterval(refresh,30000);
-   document.addEventListener('visibilitychange',refresh);
-   return()=>{clearInterval(t);document.removeEventListener('visibilitychange',refresh);};
+   const t=setInterval(()=>{if(document.hasFocus())refresh();},30000);
+   document.addEventListener('visibilitychange',refresh);window.addEventListener('focus',refresh);
+   return()=>{clearInterval(t);document.removeEventListener('visibilitychange',refresh);window.removeEventListener('focus',refresh);};
  },[]);
  async function applyView(period=viewPeriod,agent=viewAgent,customFrom=viewFrom,customTo=viewTo){
    setViewLoading(true);setSelected(null);
