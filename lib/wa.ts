@@ -139,8 +139,10 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
 // CSM messages go out automatically after each daily sync only once this is switched on (after
 // the T1–T5 templates are tested). Until then they can be tried from Super Admin → WhatsApp test.
 export const CSM_AUTO_SEND=false;
-export async function runCsmWaTriggers(sql:any,runId:number){
-  if(!CSM_AUTO_SEND) return {queued:0,note:'CSM automatic sending is off'};
+// `only` (Super Admin test): run the same rules for just these customer IDs, even while automatic
+// sending is off.
+export async function runCsmWaTriggers(sql:any,runId:number,only?:string[]){
+  if(!CSM_AUTO_SEND&&!only?.length) return {queued:0,note:'CSM automatic sending is off'};
   const ready={T1:waReady('T1_RENEW'),ENDED:waReady('T2_ENDED_FREE')&&waReady('T3_ENDED_TOPUP'),ENDING:waReady('T4_ENDING_FREE')&&waReady('T5_ENDING_TOPUP')};
   if(!ready.T1&&!ready.ENDED&&!ready.ENDING) return {queued:0,note:'CSM templates not configured'};
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
@@ -159,7 +161,8 @@ export async function runCsmWaTriggers(sql:any,runId:number){
       LEFT JOIN LATERAL (SELECT current_status,reopen_reason FROM onboarding_cases WHERE customer_id=s.customer_id ORDER BY created_at LIMIT 1) c ON TRUE
       WHERE s.sync_run_id=${runId} AND (a.customer_id IS NOT NULL OR COALESCE(s.completed_ads_count,0)>0)
     )
-    SELECT * FROM m WHERE NOT onb_lost AND NOT closed AND NOT COALESCE(reopened,FALSE)
+    SELECT * FROM m WHERE NOT COALESCE(onb_lost,FALSE) AND NOT closed AND NOT COALESCE(reopened,FALSE)
+      AND (${!only?.length} OR customer_id=ANY(${only||[]}))
   `;
   // Day one for a template pair = the first run after it goes live.
   const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template IN ('T2_ENDED_FREE','T3_ENDED_TOPUP') AND status<>'baseline'`)[0].n===0;

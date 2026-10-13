@@ -32,6 +32,10 @@ export default function WaTestPage(){
    <button className="primary" disabled={!tpl||busy||(t?.image&&!image)} onClick={send}>{busy?'Sending…':'Send test'}</button>
    {msg&&<div className="note">{msg}</div>}
   </section>
+  <section className="card"><div className="section-label">CSM automatic rules (test merchants)</div>
+   <div className="note">Runs the real CSM rules (T1–T5, exactly as after the daily sync) for the test merchants only: Nausheen, Aman and Madhav (Cust IDs 900000001–3). Each merchant gets a template once per cycle, like production.</div>
+   <button className="primary" disabled={busy} onClick={async()=>{setBusy(true);setMsg('');const r=await fetch('/api/admin/wa-test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'csm-run'})});const j=await r.json();setBusy(false);setMsg(r.ok?`CSM rules ran: ${j.count} message(s) queued. Status below.`:(j.error||'Could not run'));load();}}>Run CSM rules for test merchants</button>
+  </section>
   <section className="card"><div className="leads-head"><div className="section-label">Recent tests</div><button className="csv-btn" onClick={load}>Refresh</button></div>
    {data.rows.length===0?<div className="empty">No tests yet.</div>:<table className="split"><thead><tr><th>When</th><th>Template</th><th>To</th><th>Status</th><th>Callback tapped</th></tr></thead><tbody>
     {data.rows.map((r:any)=><tr key={r.id}><td>{fmt(r.created_at)}</td><td>{LABEL[r.template]||r.template}</td><td>{r.name||'—'} · {r.phone}</td><td title={r.status_note||''}>{r.status}{r.status!=='sent'&&r.status_note?` — ${String(r.status_note).slice(0,80)}`:''}</td><td>{r.clicked_at?`Yes · ${fmt(r.clicked_at)}`:'—'}</td></tr>)}
