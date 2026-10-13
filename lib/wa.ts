@@ -57,9 +57,11 @@ export async function queueWa(sql:any,m:QueueInput){
 // button. A template without an entry here is not sent (its messages stay queued).
 const WA_API_URL=process.env.PI_WA_URL||'https://pi-commerce-bff.paytm.com/api/pi-commerce/v1/messages/whatsapp/send';
 const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
-export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton:string}>>={
+export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton:string;headerImage?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
+  // Image header: the image link comes from the template's headerImage (or the message's header_media_url).
+  T1_RENEW:{name:'tone_renew_test_img',body:['merchant_name','impressions'],callbackButton:'0',headerImage:process.env.PI_WA_T1_IMAGE_URL||''},
 };
 export const waReady=(t:WaTemplate)=>Boolean(process.env.PI_WA_API_KEY&&WA_TEMPLATES[t]);
 // Test mode: when PI_WA_TEST_CUSTOMERS is set (comma-separated customer IDs), only those merchants
@@ -86,8 +88,10 @@ export async function sendQueuedWa(sql:any,ids:number[]){
     if(!to){await sql`UPDATE wa_messages SET status='skipped',status_note='No phone number' WHERE id=${m.id}`;continue;}
     const v=m.variables||{};
     const body=Object.fromEntries(t.body.map((k,i)=>[String(i+1),String(v[k]??'')]));
+    const media=String(v.header_media_url||t.headerImage||'');
+    if(t.headerImage!==undefined&&!media){await sql`UPDATE wa_messages SET status_note='Waiting for header image link' WHERE id=${m.id}`;continue;}
     const payload={template_name:t.name,language:{code:'en_US',policy:'deterministic'},from:WA_FROM,default_country:'IN',
-      recipients:[{to,variables:{body,buttons:{[t.callbackButton]:{'1':String(v.callback_token||'')}}}}]};
+      recipients:[{to,variables:{...(media?{header:{media_url:media}}:{}),body,buttons:{[t.callbackButton]:{'1':String(v.callback_token||'')}}}}]};
     try{
       const res=await fetch(WA_API_URL,{method:'POST',headers:{'X-API-Key':process.env.PI_WA_API_KEY!,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const text=(await res.text()).slice(0,500);
@@ -132,8 +136,13 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
 // (lapse date / ad end date). Merchants marked Not Interested / Refund (CSM closed or onboarding
 // lost) are left out. Nothing is recorded until the CSM templates are configured, so day one starts
 // when sending actually can.
+// CSM messages go out automatically after each daily sync only once this is switched on (after
+// the T1–T5 templates are tested). Until then they can be tried from Super Admin → WhatsApp test.
+export const CSM_AUTO_SEND=false;
 export async function runCsmWaTriggers(sql:any,runId:number){
-  if(!(['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'] as WaTemplate[]).some(waReady)) return {queued:0,note:'CSM templates not configured'};
+  if(!CSM_AUTO_SEND) return {queued:0,note:'CSM automatic sending is off'};
+  const ready={T1:waReady('T1_RENEW'),ENDED:waReady('T2_ENDED_FREE')&&waReady('T3_ENDED_TOPUP'),ENDING:waReady('T4_ENDING_FREE')&&waReady('T5_ENDING_TOPUP')};
+  if(!ready.T1&&!ready.ENDED&&!ready.ENDING) return {queued:0,note:'CSM templates not configured'};
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
   const rows=await sql`
     WITH m AS (
@@ -152,12 +161,14 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     )
     SELECT * FROM m WHERE NOT onb_lost AND NOT closed AND NOT COALESCE(reopened,FALSE)
   `;
-  const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE workspace='csm' AND status<>'baseline'`)[0].n===0;
+  // Day one for a template pair = the first run after it goes live.
+  const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template IN ('T2_ENDED_FREE','T3_ENDED_TOPUP') AND status<>'baseline'`)[0].n===0;
   const addDays=(d:string,n:number)=>new Date(new Date(d+'T00:00:00Z').getTime()+n*86400000).toISOString().slice(0,10);
   const ids:number[]=[];
   for(const r of rows){
     const base={workspace:'csm' as const,customerId:String(r.customer_id),phone:r.phone};
     if(r.status==='CANCELLED'||r.status==='EXPIRED'){
+      if(!ready.T1) continue;
       const cycle=String(r.due||r.cancelled_at||r.status);
       const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
         variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)}});
@@ -167,11 +178,13 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     if(!r.last_end) continue;
     const free=Number(r.credits||0)>=1000;
     if(r.last_end<=today&&(dayOne||r.last_end>=addDays(today,-1))){
+      if(!ready.ENDED) continue;
       const t=free?'T2_ENDED_FREE':'T3_ENDED_TOPUP';
       const id=await queueWa(sql,{...base,template:t,dedupeKey:`ENDED|${r.customer_id}|${r.last_end}`,sourceRef:`run:${runId}`,
         variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)}});
       if(id) ids.push(id);
     }else if(r.last_end===addDays(today,1)&&r.active_ads>0){
+      if(!ready.ENDING) continue;
       const t=free?'T4_ENDING_FREE':'T5_ENDING_TOPUP';
       const id=await queueWa(sql,{...base,template:t,dedupeKey:`ENDING|${r.customer_id}|${r.last_end}`,sourceRef:`run:${runId}`,
         variables:{merchant_name:r.name||'',ad_end_date:fmtDate(r.last_end),credits:fmtMoney(r.credits??0)}});
