@@ -52,6 +52,22 @@ export async function GET(req: Request) {
     `;
   }catch{}
 
+  // Plan Upgraded (Seller, Onboarding or CSM): +1 Payment Done for whoever logged it, revenue =
+  // the upgrade value (new plan price minus current plan price, ex-GST).
+  let upgradeRows:any[]=[];
+  try{
+    upgradeRows=await sql`
+      SELECT c.customer_id,c.call_date::text AS day,c.upgrade_value_inr::float8 AS value,COALESCE(a.name,c.agent_name_raw,'Unknown') AS agent_name
+      FROM calls c LEFT JOIN agents a ON a.id=c.agent_id
+      WHERE c.upgrade_from_plan IS NOT NULL AND c.call_date BETWEEN ${from}::date AND ${to}::date
+      UNION ALL
+      SELECT e.customer_id,e.event_date::text,e.upgrade_value_inr::float8,COALESCE(a.name,e.agent_name_raw,'Unknown')
+      FROM onboarding_events e LEFT JOIN agents a ON a.id=e.agent_id
+      WHERE e.l0_code='OB_PLAN_UPGRADED' AND e.event_date BETWEEN ${from}::date AND ${to}::date
+        AND e.source_type IN ('new_event','customer_success_followup')
+    `;
+  }catch{}
+
   const totalAttempts=rows.length;
   const uniqueAttempted=new Set(rows.map((r:any)=>r.customer_id)).size;
   const connected=rows.filter((r:any)=>connectionBucket(r.l0_label_snapshot||r.status_raw)==='connected').length;
@@ -60,11 +76,11 @@ export async function GET(req: Request) {
   const count=(bucket:any)=>rows.filter((r:any)=>hasBucket(r,bucket)).length;
   const callbackRequested=count('CALLBACK');
   const interested=count('INTERESTED');
-  const paymentDone=count('PAYMENT_DONE')+renewalRows.length;
+  const paymentDone=count('PAYMENT_DONE')+renewalRows.length+upgradeRows.length;
   // Revenue: ₹799 per sale up to 30 Sep 2026; from 1 Oct the ex-GST price of the plan sold.
   const saleRev=(r:any)=>hasBucket(r,'PAYMENT_DONE')?saleRevenue(r.call_day,r.plan_amount_inr):0;
   const renewalRev=(r:any)=>saleRevenue(r.event_day,r.plan_amount_inr);
-  const revenue=rows.reduce((t:number,r:any)=>t+saleRev(r),0)+renewalRows.reduce((t:number,r:any)=>t+renewalRev(r),0);
+  const revenue=rows.reduce((t:number,r:any)=>t+saleRev(r),0)+renewalRows.reduce((t:number,r:any)=>t+renewalRev(r),0)+upgradeRows.reduce((t:number,r:any)=>t+(Number(r.value)||0),0);
   const visitsRequested=count('VISIT_REQUESTED');
   const paymentIssues=count('PAYMENT_ISSUE');
   const technicalIssues=count('TECHNICAL_ISSUE');
@@ -104,6 +120,13 @@ export async function GET(req: Request) {
     x.revenue+=renewalRev(r);
     agentMap.set(k,x);
   }
+  for(const r of upgradeRows){
+    const k=r.agent_name||'Unknown';
+    const x=agentMap.get(k)||{attempts:0,unique:new Set<string>(),connected:0,interested:0,paymentDone:0,revenue:0,callbacks:0,paymentIssues:0,technicalIssues:0,whatsappHandoffs:0};
+    x.paymentDone++;
+    x.revenue+=Number(r.value)||0;
+    agentMap.set(k,x);
+  }
   const agentPerformance=[...agentMap.entries()].map(([name,x])=>({
     name,attempts:x.attempts,unique:x.unique.size,connected:x.connected,connectRate:pct(x.connected,x.attempts),
     interested:x.interested,paymentDone:x.paymentDone,revenue:x.revenue,callbacks:x.callbacks,paymentIssues:x.paymentIssues,
@@ -123,6 +146,7 @@ export async function GET(req: Request) {
   };
   for(const r of rows) if(hasBucket(r,'PAYMENT_DONE')) addTeam(r.agent_name||'Unknown',r.call_day,saleRev(r));
   for(const r of renewalRows) addTeam(r.agent_name||'Unknown',r.event_day,renewalRev(r));
+  for(const r of upgradeRows) addTeam(r.agent_name||'Unknown',r.day,Number(r.value)||0);
   const teamPerformance=[...teams.values()].map(t=>({team:t.team,members:[...t.members].sort(),paymentDone:t.paymentDone,revenue:t.revenue})).sort((a,b)=>b.revenue-a.revenue);
 
   return NextResponse.json({
@@ -131,8 +155,9 @@ export async function GET(req: Request) {
     connectRateKnownDenominator:(connected+notConnected)?pct(connected,connected+notConnected):null,
     callbackRequested,callbackRate:pct(callbackRequested,totalAttempts),
     interested,interestedRate:pct(interested,totalAttempts),
-    paymentDone,revenue,teamPerformance,paymentRate:pct(paymentDone,totalAttempts+renewalRows.length),
+    paymentDone,revenue,teamPerformance,paymentRate:pct(paymentDone,totalAttempts+renewalRows.length+upgradeRows.length),
     onboardingSubscriptionRenewals:renewalRows.length,
+    planUpgrades:upgradeRows.length,
     visitsRequested,paymentIssues,technicalIssues,whatsappHandoffs,fbLinkingIssues,
     freshDispositionSplit:toSplit(freshDisp,freshCustomers),
     repeatDispositionSplit:toSplit(repeatDisp,repeatCustomers),
@@ -144,7 +169,7 @@ export async function GET(req: Request) {
       connectRate:'Conservative: known connected/not-connected outcomes only. Unknown legacy outcomes are excluded.',
       semanticBuckets:'Quick Answers classifies approved disposition/status labels across L0, L1 or L2; it never scans free-text remarks.',
       revenue:'Ex-GST. ₹799 per sale up to 30 Sep 2026; from 1 Oct 2026 the price of the plan sold (Silver ₹1,999, Gold ₹4,999, Platinum ₹9,999). Renewals before Ads Live count for the case owner, after Ads Live for whoever logged them.',
-      subscriptionRenewal:'Only the explicit Subscription Renewed outcome from Onboarding or post-live Customer Success is added to Seller Payment Done. No other onboarding activity affects Seller analytics.',
+      subscriptionRenewal:'Only the explicit Subscription Renewed outcome from Onboarding or post-live Customer Success is added to Seller Payment Done. Plan Upgraded (from any workspace) also adds 1 to Payment Done, with the upgrade value as revenue. No other onboarding activity affects Seller analytics.',
       visitsRequested:'Only date-attributable call dispositions are counted; legacy customer-level flags are not assigned to a guessed call date.'
     }
   });
