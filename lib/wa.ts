@@ -72,10 +72,9 @@ export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];c
 // Test stage for CSM templates: while a template has testers here it goes only to them (once each,
 // with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.
 // Their taps are logged against TEST_CUSTOMER (Madhav's test merchant) in the CSM Req Call Back pane.
-const TESTERS=[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}];
-export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={
-  T2_ENDED_FREE:TESTERS,T3_ENDED_TOPUP:TESTERS,T4_ENDING_FREE:TESTERS,T5_ENDING_TOPUP:TESTERS,
-};
+// Testers used so far (Madhav, Nausheen, Aman): set e.g. {T2_ENDED_FREE:WA_TESTERS} to test a new template.
+export const WA_TESTERS=[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}];
+export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={};
 const TEST_CUSTOMER='518726118';
 const TEST_VARIABLES:Record<string,string>={impressions:'12,450',credits:'₹2,500',ad_end_date:fmtDate(new Date(Date.now()+86400000).toISOString())};
 const csmLive=(t:WaTemplate)=>waReady(t)&&!CSM_WA_TESTERS[t];
