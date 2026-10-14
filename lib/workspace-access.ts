@@ -22,6 +22,7 @@ export async function currentUserAccess(){
   let seller:WorkspaceRole=agent.role==='admin'?'admin':'agent';
   let onboarding:WorkspaceRole=null;
   let csm:WorkspaceRole=null;
+  let incentives:WorkspaceRole=null;
   if(hasSuper){
     const rows=await sql`SELECT is_super_admin FROM agents WHERE id=${agent.id}::uuid LIMIT 1`;
     isSuperAdmin=Boolean(rows[0]?.is_super_admin);
@@ -32,8 +33,9 @@ export async function currentUserAccess(){
     seller=(map.seller||null) as WorkspaceRole;
     onboarding=(map.onboarding||null) as WorkspaceRole;
     csm=(map.csm||null) as WorkspaceRole;
+    incentives=(map.incentives||null) as WorkspaceRole;
   }
-  return {...agent,isSuperAdmin,access:{seller,onboarding,csm}};
+  return {...agent,isSuperAdmin,access:{seller,onboarding,csm,incentives}};
 }
 
 export function canAccess(user:any,workspace:Workspace){
@@ -42,6 +44,11 @@ export function canAccess(user:any,workspace:Workspace){
 
 export function isWorkspaceAdmin(user:any,workspace:Workspace){
   return Boolean(user?.isSuperAdmin || user?.access?.[workspace]==='admin');
+}
+
+// Incentives tab (and its downloads): Super Admins, and people given Incentives access (finance).
+export function canSeeIncentives(user:any){
+  return Boolean(user?.isSuperAdmin || user?.access?.incentives);
 }
 
 export function canManageAllOnboardingCases(user:any){
