@@ -38,6 +38,7 @@ export default function TeamsPanel(){
       {m.upcoming&&m.member&&<em>{m.upcoming.member?` · incentive ${m.upcoming.incentive?'on':'off'} from ${fmt(m.upcoming.date)}`:` · leaves ${fmt(m.upcoming.date)}`}</em>}
       {m.upcomingRole&&<em> · {m.upcomingRole.role==='NONE'?'no role':ROLE_LABEL[m.upcomingRole.role]} from {fmt(m.upcomingRole.date)}</em>}</span></div>
     <div className="team-ctl">
+     {team==='sales'&&m.member&&<label className="sw" title="Gets new Lead Gen Ads leads in the rotation"><input type="checkbox" checked={Boolean(m.leadgen)} onChange={e=>send({action:'leadgen',agentId:m.id,on:e.target.checked})}/><span>Lead gen</span></label>}
      {team==='onboarding'&&m.member&&<label className="sw" title="Gets new cases in the rotation"><input type="checkbox" checked={m.rotation} onChange={e=>send({action:'rotation',agentId:m.id,on:e.target.checked})}/><span>New cases</span></label>}
      {team==='csm'&&m.member&&<label className="share" title="Share of new CSM merchants">Share<input type="number" min={0} max={100} defaultValue={m.share} onBlur={e=>{const v=Number(e.target.value);if(v!==m.share)send({action:'share',agentId:m.id,share:v});}}/>%</label>}
      {m.member&&<label className="sw" title="Earns this team's incentive (from today)"><input type="checkbox" checked={m.incentive} onChange={e=>send({action:'incentive',agentId:m.id,incentive:e.target.checked})}/><span>Incentive</span></label>}

@@ -1,5 +1,5 @@
 import { NextResponse,after } from 'next/server';
-import { SELLER_WA_L0,triggerSellerWa,resolveCallbackRequests } from '@/lib/wa';
+import { SELLER_WA_L0,triggerSellerWa,triggerSellerLeadWa,resolveCallbackRequests } from '@/lib/wa';
 import { currentAgent } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { PLANS, isPlanCode, plansRequiredOn } from '@/lib/plans';
@@ -14,7 +14,11 @@ export async function POST(req: Request) {
   const agent=await currentAgent();
   if (!agent) return NextResponse.json({error:'Unauthenticated'},{status:401});
   const body=await req.json();
-  const customerId=String(body.customerId||'').trim();
+  let customerId=String(body.customerId||'').trim();
+  // Lead Gen Ads: a lead with a Cust ID is logged against the Cust ID (and tagged with the lead);
+  // a lead without one is logged against the lead (its phone), never with the phone as a Cust ID.
+  const leadId=body.leadId&&/^[0-9a-f-]{36}$/i.test(String(body.leadId))?String(body.leadId):null;
+  let lead:any=null;
   const l0Code=String(body.l0Code||'').trim();
   const l1Code=body.l1Code ? String(body.l1Code) : null;
   const l2Code=body.l2Code ? String(body.l2Code) : null;
@@ -24,12 +28,18 @@ export async function POST(req: Request) {
   const callbackTime=body.callbackTime ? String(body.callbackTime) : null;
   const planCodeRaw=body.planCode ? String(body.planCode) : null;
   if (planCodeRaw && !isPlanCode(planCodeRaw)) return NextResponse.json({error:'Invalid plan'},{status:400});
-  if (!customerId || !l0Code) return NextResponse.json({error:'Customer ID and L0 are required'},{status:400});
   const sql=db();
+  if (leadId) {
+    lead=(await sql`SELECT id,phone,name,customer_id FROM leadgen_leads WHERE id=${leadId}::uuid`)[0]||null;
+    if (!lead) return NextResponse.json({error:'Lead not found'},{status:404});
+    customerId=lead.customer_id?String(lead.customer_id):'';
+  }
+  const leadOnly=Boolean(lead&&!customerId);
+  if ((!customerId&&!leadOnly) || !l0Code) return NextResponse.json({error:'Customer ID and L0 are required'},{status:400});
   try {
     const result=await sql.begin(async tx=>{
-      await tx`SELECT pg_advisory_xact_lock(hashtext(${customerId}))`;
-      await tx`INSERT INTO customers (customer_id) VALUES (${customerId}) ON CONFLICT (customer_id) DO NOTHING`;
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${leadOnly?'lead:'+lead.id:customerId}))`;
+      if (!leadOnly) await tx`INSERT INTO customers (customer_id) VALUES (${customerId}) ON CONFLICT (customer_id) DO NOTHING`;
       const nodes=await tx`SELECT id,code,label,level,parent_id FROM disposition_nodes WHERE code IN (${l0Code},${l1Code},${l2Code}) AND active=TRUE`;
       const byCode=new Map(nodes.map((n:any)=>[n.code,n]));
       const l0:any=byCode.get(l0Code);
@@ -60,7 +70,9 @@ export async function POST(req: Request) {
         if(!callbackAt || new Date(callbackAt).getTime()<=Date.now()) throw new Error('Callback date and time must be in the future');
       }
 
-      const max=await tx`SELECT COALESCE(max(attempt_number),0)::int AS n FROM calls WHERE customer_id=${customerId}`;
+      const max=leadOnly
+        ?await tx`SELECT COALESCE(max(attempt_number),0)::int AS n FROM calls WHERE lead_id=${lead.id}::uuid AND customer_id IS NULL`
+        :await tx`SELECT COALESCE(max(attempt_number),0)::int AS n FROM calls WHERE customer_id=${customerId}`;
       const attempt=Number(max[0].n)+1;
       // Business date is India time. Using UTC here would record the previous date between 00:00-05:30 IST.
       const [dateRow]=await tx`SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date::text AS today`;
@@ -74,21 +86,24 @@ export async function POST(req: Request) {
       // difference in price is the upgrade value counted for incentives.
       let upgradeFrom:string|null=null, upgradeValueInr:number|null=null;
       if (l0Code==='l0_plan_upgraded') {
+        if (leadOnly) throw new Error('Plan Upgraded needs the merchant\'s Cust ID; this lead has none yet.');
         try {
           const u=await resolveUpgrade(tx,customerId,planCodeRaw,body.currentPlan);
           planCode=u.to; planAmount=u.price; upgradeFrom=u.from; upgradeValueInr=u.value;
         } catch (e:any) { throw new Error(UPGRADE_ERRORS[e?.message]||'Could not record the upgrade'); }
       }
-      const seqRows=await tx`SELECT COALESCE(max(call_seq),0)::int AS n FROM calls WHERE customer_id=${customerId} AND call_date=${today}::date`;
+      const seqRows=leadOnly
+        ?await tx`SELECT COALESCE(max(call_seq),0)::int AS n FROM calls WHERE lead_id=${lead.id}::uuid AND customer_id IS NULL AND call_date=${today}::date`
+        :await tx`SELECT COALESCE(max(call_seq),0)::int AS n FROM calls WHERE customer_id=${customerId} AND call_date=${today}::date`;
       const seq=Number(seqRows[0].n)+1;
-      const sourceKey=`NEW|${customerId}|${Date.now()}|${crypto.randomUUID()}`;
+      const sourceKey=`NEW|${leadOnly?'lead:'+lead.id:customerId}|${Date.now()}|${crypto.randomUUID()}`;
       const rows=await tx`
         INSERT INTO calls (
-          customer_id,attempt_number,call_date,call_seq,event_time,agent_id,agent_name_raw,source_type,source_key,
+          customer_id,lead_id,phone,attempt_number,call_date,call_seq,event_time,agent_id,agent_name_raw,source_type,source_key,
           l0_id,l1_id,l2_id,l0_label_snapshot,l1_label_snapshot,l2_label_snapshot,remark,facebook_page_status,
           whatsapp_handoff,callback_at,is_legacy,is_conversion_authoritative,plan_code,plan_amount_inr,upgrade_from_plan,upgrade_value_inr
         ) VALUES (
-          ${customerId},${attempt},${today}::date,${seq},now(),${String(agent.id)}::uuid,${String(agent.name)},'new_call',${sourceKey},
+          ${leadOnly?null:customerId},${lead?lead.id:null}::uuid,${lead?lead.phone:null},${attempt},${today}::date,${seq},now(),${String(agent.id)}::uuid,${String(agent.name)},'new_call',${sourceKey},
           ${String(l0.id)}::uuid,${l1?String(l1.id):null}::uuid,${l2?String(l2.id):null}::uuid,${String(l0.label)},${l1?String(l1.label):null},${l2?String(l2.label):null},${remark},${fb},
           ${String(l1?.label||'')==='Taken to WhatsApp for closure'},${callbackAt},FALSE,TRUE,${planCode},${planAmount},${upgradeFrom},${upgradeValueInr}
         ) RETURNING *
@@ -97,10 +112,13 @@ export async function POST(req: Request) {
     });
     // Clear this merchant's open callback requests now, so the pane updates as soon as the save
     // returns. The WhatsApp nudge runs after the response so the save is never slowed down.
-    try{await resolveCallbackRequests(sql,'seller',customerId);}catch(e){console.error('seller callback resolve error',e);}
+    try{await resolveCallbackRequests(sql,'seller',leadOnly?null:customerId,lead?.id);}catch(e){console.error('seller callback resolve error',e);}
     after(async()=>{
       try{
-        if(SELLER_WA_L0.includes(l0Code)) await triggerSellerWa(sql,customerId,String(agent.id),String(result.id));
+        if(SELLER_WA_L0.includes(l0Code)){
+          if(leadOnly) await triggerSellerLeadWa(sql,{id:String(lead.id),phone:String(lead.phone),name:lead.name},String(agent.id),String(result.id));
+          else await triggerSellerWa(sql,customerId,String(agent.id),String(result.id));
+        }
       }catch(e){console.error('seller whatsapp error',e);}
     });
     return NextResponse.json({ok:true,call:result});

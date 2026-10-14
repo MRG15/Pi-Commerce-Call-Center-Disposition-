@@ -68,22 +68,23 @@ export async function GET(req:Request){
   // disposition filter shows which bucket every lead is in now.
   const rows=await sql`
     WITH base AS (
-      SELECT c.id,c.customer_id,c.call_date::text AS call_date,c.event_time,COALESCE(a.name,c.agent_name_raw) AS agent_name,
+      SELECT c.id,c.customer_id,c.lead_id,c.phone AS lead_phone,c.call_date::text AS call_date,c.event_time,COALESCE(a.name,c.agent_name_raw) AS agent_name,
         c.l0_id,c.l1_id,c.l2_id,c.l0_label_snapshot,c.l1_label_snapshot,c.l2_label_snapshot,c.remark,c.callback_at,c.plan_code,c.plan_amount_inr,
-        count(*) OVER (PARTITION BY c.customer_id) AS calls_in_range,
-        row_number() OVER (PARTITION BY c.customer_id ORDER BY c.event_time DESC NULLS LAST,c.attempt_number DESC) AS rn
+        count(*) OVER (PARTITION BY COALESCE(c.customer_id,'lead:'||c.lead_id::text)) AS calls_in_range,
+        row_number() OVER (PARTITION BY COALESCE(c.customer_id,'lead:'||c.lead_id::text) ORDER BY c.event_time DESC NULLS LAST,c.attempt_number DESC) AS rn
       FROM calls c LEFT JOIN agents a ON a.id=c.agent_id
       WHERE c.source_type='new_call'
         AND c.agent_id=ANY(${ids}::uuid[])
         AND c.call_date BETWEEN ${from}::date AND ${to}::date
     ), named AS (
       SELECT b.*,
-        COALESCE(m.merchant_name,cu.merchant_name,el.name) AS name,
-        COALESCE(m.phone_number,cu.phone,el.phone) AS phone,
+        COALESCE(m.merchant_name,cu.merchant_name,el.name,lg.name) AS name,
+        COALESCE(m.phone_number,cu.phone,el.phone,b.lead_phone) AS phone,
         (el.customer_id IS NOT NULL) AS external
       FROM base b
       LEFT JOIN merchant_information m ON m.customer_id=b.customer_id AND m.active=TRUE
       LEFT JOIN customers cu ON cu.customer_id=b.customer_id
+      LEFT JOIN leadgen_leads lg ON lg.id=b.lead_id
       ${externalJoin}
       WHERE (${mode}='all' OR b.rn=1)
     )
@@ -91,7 +92,7 @@ export async function GET(req:Request){
     WHERE (${l0Id}::uuid IS NULL OR l0_id=${l0Id}::uuid)
       AND (${l1Id}::uuid IS NULL OR l1_id=${l1Id}::uuid)
       AND (${l2Id}::uuid IS NULL OR l2_id=${l2Id}::uuid)
-      AND (${q}='' OR customer_id ILIKE ${'%'+q+'%'} OR COALESCE(name,'') ILIKE ${'%'+q+'%'}
+      AND (${q}='' OR COALESCE(customer_id,'') ILIKE ${'%'+q+'%'} OR COALESCE(name,'') ILIKE ${'%'+q+'%'}
         OR (${qDigits.length>=4} AND regexp_replace(COALESCE(phone,''),'[^0-9]','','g') LIKE ${'%'+qDigits+'%'}))
     ORDER BY event_time DESC NULLS LAST
     LIMIT 2000

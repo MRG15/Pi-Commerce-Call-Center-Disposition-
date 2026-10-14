@@ -39,12 +39,12 @@ export async function waSuppressed(sql:any,customerId:string){
   return Boolean(rows[0]?.suppressed);
 }
 
-type QueueInput={template:WaTemplate;workspace:WaWorkspace;customerId:string;phone?:string|null;agentId?:string|null;sourceRef?:string|null;dedupeKey?:string|null;variables:Record<string,string>;status?:'queued'|'baseline'|'skipped';note?:string};
+type QueueInput={template:WaTemplate;workspace:WaWorkspace;customerId:string|null;leadId?:string|null;phone?:string|null;agentId?:string|null;sourceRef?:string|null;dedupeKey?:string|null;variables:Record<string,string>;status?:'queued'|'baseline'|'skipped';note?:string};
 export async function queueWa(sql:any,m:QueueInput){
   const token=newToken();
   const rows=await sql`
-    INSERT INTO wa_messages(token,template,workspace,customer_id,phone,agent_id,source_ref,dedupe_key,variables,status,status_note)
-    VALUES(${token},${m.template},${m.workspace},${m.customerId},${m.phone||null},${m.agentId||null},${m.sourceRef||null},${m.dedupeKey||null},
+    INSERT INTO wa_messages(token,template,workspace,customer_id,lead_id,phone,agent_id,source_ref,dedupe_key,variables,status,status_note)
+    VALUES(${token},${m.template},${m.workspace},${m.customerId},${m.leadId||null},${m.phone||null},${m.agentId||null},${m.sourceRef||null},${m.dedupeKey||null},
       ${sql.json({...m.variables,callback_token:token})},${m.status||'queued'},${m.note||null})
     -- A message that failed to send is retried the next time its rule runs.
     ON CONFLICT (dedupe_key) DO UPDATE SET token=EXCLUDED.token,phone=EXCLUDED.phone,variables=EXCLUDED.variables,status='queued',status_note=NULL,source_ref=EXCLUDED.source_ref
@@ -109,6 +109,11 @@ export async function triggerSellerWa(sql:any,customerId:string,agentId:string,c
   if(await waSuppressed(sql,customerId)) return;
   const c=await merchantContact(sql,customerId);
   const id=await queueWa(sql,{template:'SELLER_NOT_CONNECTED',workspace:'seller',customerId,phone:c.phone,agentId,sourceRef:`call:${callId}`,variables:{merchant_name:c.name}});
+  if(id) await sendQueuedWa(sql,[id]);
+}
+// Seller: the same nudge for a Lead Gen lead that has no Cust ID yet (name and phone from the lead).
+export async function triggerSellerLeadWa(sql:any,lead:{id:string;phone:string;name:string|null},agentId:string,callId:string){
+  const id=await queueWa(sql,{template:'SELLER_NOT_CONNECTED',workspace:'seller',customerId:null,leadId:lead.id,phone:lead.phone,agentId,sourceRef:`call:${callId}`,variables:{merchant_name:lead.name||''}});
   if(id) await sendQueuedWa(sql,[id]);
 }
 
@@ -211,6 +216,7 @@ export async function ensureCsmWaRun(sql:any){
 }
 
 // A new disposition by the workspace clears that merchant's open callback requests there.
-export async function resolveCallbackRequests(sql:any,workspace:WaWorkspace,customerId:string){
-  await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND customer_id=${customerId} AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
+export async function resolveCallbackRequests(sql:any,workspace:WaWorkspace,customerId:string|null,leadId?:string|null){
+  if(customerId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND customer_id=${customerId} AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
+  if(leadId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND lead_id=${leadId}::uuid AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
 }

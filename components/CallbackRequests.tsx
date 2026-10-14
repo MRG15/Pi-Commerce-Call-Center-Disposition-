@@ -26,8 +26,8 @@ export default function CallbackRequestList({rows,onOpen,showOwner,title=true}:{
  return <section className="card req-cb">{title&&<div className="section-label">Req Call Back</div>}
   {rows.length===0?<div className="empty">No callback requests right now. Merchants who tap "Request a callback" in a WhatsApp message show up here.</div>
   :<div className="req-cb-list">{rows.map(r=><button key={r.id} onClick={()=>onOpen(r)}>
-   <strong>{r.merchant_name||`Customer ${r.customer_id}`}</strong>
-   <span>Cust ID {r.customer_id} · {TEMPLATE_LABEL[r.template]||r.template} · {ago(r.clicked_at)}{showOwner&&r.owner?` · ${r.owner}`:''}{r.click_count>1?` · tapped ${r.click_count}×`:''}</span>
+   <strong>{r.merchant_name||(r.customer_id?`Customer ${r.customer_id}`:r.phone)}</strong>
+   <span>{r.customer_id?`Cust ID ${r.customer_id}`:`Lead · ${r.phone||''}`} · {TEMPLATE_LABEL[r.template]||r.template} · {ago(r.clicked_at)}{showOwner&&r.owner?` · ${r.owner}`:''}{r.click_count>1?` · tapped ${r.click_count}×`:''}</span>
   </button>)}</div>}
  </section>;
 }

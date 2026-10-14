@@ -19,8 +19,9 @@ export async function GET(req:Request){
     if(!canAccess(user,'seller')) return NextResponse.json({error:'Seller access required'},{status:403});
     const all=isWorkspaceAdmin(user,'seller');
     const rows=await sql`
-      SELECT m.id,m.customer_id,m.template,m.clicked_at,m.click_count,COALESCE(mi.merchant_name,c.merchant_name) AS merchant_name,a.name AS owner
-      FROM wa_messages m LEFT JOIN merchant_information mi ON mi.customer_id=m.customer_id LEFT JOIN customers c ON c.customer_id=m.customer_id LEFT JOIN agents a ON a.id=m.agent_id
+      SELECT m.id,m.customer_id,m.lead_id,m.phone,m.template,m.clicked_at,m.click_count,COALESCE(mi.merchant_name,c.merchant_name,lg.name) AS merchant_name,a.name AS owner
+      FROM wa_messages m LEFT JOIN merchant_information mi ON mi.customer_id=m.customer_id LEFT JOIN customers c ON c.customer_id=m.customer_id
+      LEFT JOIN leadgen_leads lg ON lg.id=m.lead_id LEFT JOIN agents a ON a.id=m.agent_id
       WHERE m.workspace='seller' AND m.clicked_at IS NOT NULL AND m.resolved_at IS NULL AND (${all} OR m.agent_id=${user.id}::uuid)
       ORDER BY m.clicked_at DESC LIMIT 100
     `;

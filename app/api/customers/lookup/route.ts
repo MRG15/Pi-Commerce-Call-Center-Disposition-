@@ -39,5 +39,11 @@ export async function GET(req:Request){
     if(matches.has(id)) continue;
     matches.set(id,{customerId:id,merchantName:r.merchant_name||null,phone:r.phone||null,matchedBy:'phone number'});
   }
-  return NextResponse.json({query:q,matches:[...matches.values()]});
+  // A Lead Gen lead with this phone and no merchant yet: open the lead (never the phone as a Cust ID).
+  let lead=null;
+  if(phone&&!matches.size){
+    const ok=await sql`SELECT to_regclass('public.leadgen_leads') IS NOT NULL AS ok`;
+    if(ok[0]?.ok) lead=(await sql`SELECT id,name,phone FROM leadgen_leads WHERE phone=${phone} ORDER BY submitted_at DESC LIMIT 1`)[0]||null;
+  }
+  return NextResponse.json({query:q,matches:[...matches.values()],lead});
 }
