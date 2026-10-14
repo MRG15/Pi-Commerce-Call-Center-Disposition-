@@ -62,14 +62,19 @@ const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
+  // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
   T1_RENEW:{name:'tone_renew_test_nocl',body:['merchant_name','impressions'],callbackButton:'1'},
-  // T2–T5 are not mapped yet.
+  T2_ENDED_FREE:{name:'ttwo_ended_free_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
+  T3_ENDED_TOPUP:{name:'tthree_ended_topup_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
+  T4_ENDING_FREE:{name:'tfour_ending_free_nocl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
+  T5_ENDING_TOPUP:{name:'tfive_ending_topup_test',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
 };
 // Test stage for CSM templates: while a template has testers here it goes only to them (once each,
 // with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.
 // Their taps are logged against TEST_CUSTOMER (Madhav's test merchant) in the CSM Req Call Back pane.
+const TESTERS=[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}];
 export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={
-  T1_RENEW:[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}],
+  T2_ENDED_FREE:TESTERS,T3_ENDED_TOPUP:TESTERS,T4_ENDING_FREE:TESTERS,T5_ENDING_TOPUP:TESTERS,
 };
 const TEST_CUSTOMER='518726118';
 const TEST_VARIABLES:Record<string,string>={impressions:'12,450',credits:'₹2,500',ad_end_date:fmtDate(new Date(Date.now()+86400000).toISOString())};
@@ -178,7 +183,7 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     SELECT * FROM m WHERE NOT COALESCE(onb_lost,FALSE) AND NOT closed AND NOT COALESCE(reopened,FALSE)
   `;
   // Day one for a template pair = the first run after it goes live.
-  const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template IN ('T2_ENDED_FREE','T3_ENDED_TOPUP') AND status<>'baseline'`)[0].n===0;
+  const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template IN ('T2_ENDED_FREE','T3_ENDED_TOPUP') AND status<>'baseline' AND COALESCE(source_ref,'') NOT LIKE 'test:%'`)[0].n===0;
   const addDays=(d:string,n:number)=>new Date(new Date(d+'T00:00:00Z').getTime()+n*86400000).toISOString().slice(0,10);
   const ids:number[]=[];
   for(const r of rows){
