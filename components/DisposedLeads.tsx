@@ -57,7 +57,7 @@ export default function DisposedLeads({nodes,me,onOpen}:{nodes:Node[];me:any;onO
     const q=search.trim().toLowerCase(),qd=q.replace(/\D/g,'');
     return rows.filter(r=>(!bucket||bucketOf(r)===bucket)
       &&(!l0||r.l0_id===l0)&&(!l1||r.l1_id===l1)&&(!l2||r.l2_id===l2)
-      &&(!q||String(r.customer_id).includes(q)||String(r.name||'').toLowerCase().includes(q)||(qd.length>=4&&String(r.phone||'').replace(/\D/g,'').includes(qd))));
+      &&(!q||String(r.customer_id||'').includes(q)||String(r.name||'').toLowerCase().includes(q)||(qd.length>=4&&String(r.phone||'').replace(/\D/g,'').includes(qd))));
   },[rows,search,bucket,l0,l1,l2]);
   const multiAgent=agents.length>1;
 
@@ -117,9 +117,9 @@ export default function DisposedLeads({nodes,me,onOpen}:{nodes:Node[];me:any;onO
     <section className="card">
       {shown.length===0?<div className="empty">{loading?'Loading…':'No disposed leads for these filters.'}</div>:
       <div className="table-scroll"><table className="split leads-table"><thead><tr><th>Disposed</th><th>Customer ID</th><th>Name</th><th>Phone</th><th>Disposition</th><th>Plan</th><th>Remark</th><th>Callback</th>{multiAgent&&<th>Agent</th>}{mode==='latest'&&<th>Calls</th>}</tr></thead>
-        <tbody>{shown.map(r=><tr key={r.id} className="clickable" onClick={()=>onOpen(String(r.customer_id))} title="Open on Home">
+        <tbody>{shown.map(r=><tr key={r.id} className="clickable" onClick={()=>onOpen(r.customer_id?String(r.customer_id):'lead:'+r.lead_id)} title="Open on Home">
           <td>{fmtTime(r.event_time)}</td>
-          <td>{r.customer_id}{r.external&&<span className="tag-external">External</span>}</td>
+          <td>{r.customer_id||<span className="tag-external">Lead gen · no Cust ID yet</span>}{r.external&&<span className="tag-external">External</span>}</td>
           <td>{r.name||'—'}</td>
           <td>{r.phone||'—'}</td>
           <td className="disp-cell">{disposition(r)}</td>

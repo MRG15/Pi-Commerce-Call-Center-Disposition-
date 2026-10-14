@@ -21,7 +21,7 @@ export async function GET(req:Request){
 
   // All Payment done / Enrolled via WhatsApp calls up to `to`: the first-payment rule needs full history.
   const calls=await sql`
-    SELECT c.customer_id,c.call_date::text AS date,c.call_seq,c.attempt_number,COALESCE(a.name,c.agent_name_raw,'Unknown') AS person,c.plan_amount_inr::float8 AS plan_amount,c.plan_code
+    SELECT COALESCE(c.customer_id,'lead:'||c.lead_id::text) AS customer_id,c.call_date::text AS date,c.call_seq,c.attempt_number,COALESCE(a.name,c.agent_name_raw,'Unknown') AS person,c.plan_amount_inr::float8 AS plan_amount,c.plan_code
     FROM calls c LEFT JOIN agents a ON a.id=c.agent_id
     WHERE c.call_date<=${to}::date
       AND (

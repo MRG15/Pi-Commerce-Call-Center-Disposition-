@@ -1,3 +1,4 @@
+import { assignUnassignedLeads } from '@/lib/leadgen';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { currentUserAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
@@ -29,6 +30,8 @@ export async function GET(){
   const rotation=await sql`SELECT agent_id FROM onboarding_roster`;
   const weights=await sql`SELECT agent_id,weight FROM csm_weights`;
   const inRotation=new Set(rotation.map((r:any)=>String(r.agent_id)));
+  const lg=(await sql`SELECT to_regclass('public.leadgen_roster') IS NOT NULL AS ok`)[0]?.ok?await sql`SELECT agent_id FROM leadgen_roster`:[];
+  const inLeadgen=new Set(lg.map((r:any)=>String(r.agent_id)));
   const weightOf=new Map(weights.map((w:any)=>[String(w.agent_id),Number(w.weight)]));
   const members:any={sales:[],onboarding:[],csm:[]};
   for(const p of people){
@@ -52,6 +55,7 @@ export async function GET(){
         if(nr) row.upcomingRole={date:nr.effective_from,role:nr.role,teamLead:nr.team_lead_name||null};
       }
       if(team==='onboarding') row.rotation=inRotation.has(id);
+      if(team==='sales') row.leadgen=inLeadgen.has(id);
       if(team==='csm') row.share=weightOf.get(id)??0;
       members[team].push(row);
     }
@@ -121,6 +125,12 @@ export async function POST(req:Request){
         if(team!=='onboarding') throw new Error('TEAM');
         if(b.on) await tx`INSERT INTO onboarding_roster(agent_id) VALUES(${agentId}::uuid) ON CONFLICT (agent_id) DO NOTHING`;
         else await tx`DELETE FROM onboarding_roster WHERE agent_id=${agentId}::uuid`;
+      }else if(action==='leadgen'){
+        // Lead Gen Ads: switched on = gets new leads in the rotation. Switching off keeps the
+        // person's existing leads with them.
+        if(team!=='sales') throw new Error('TEAM');
+        if(b.on) await tx`INSERT INTO leadgen_roster(agent_id) VALUES(${agentId}::uuid) ON CONFLICT (agent_id) DO NOTHING`;
+        else await tx`DELETE FROM leadgen_roster WHERE agent_id=${agentId}::uuid`;
       }else if(action==='share'){
         if(team!=='csm') throw new Error('TEAM');
         const w=Math.round(Number(b.share));
@@ -140,5 +150,7 @@ export async function POST(req:Request){
   }
   // Changes dated today take effect straight away.
   if(date===today) await applyDueTeamChanges(sql,true);
+  // Someone switched on for Lead gen picks up any leads waiting for an owner.
+  if(action==='leadgen'&&b.on) await assignUnassignedLeads(sql);
   return NextResponse.json({ok:true});
 }

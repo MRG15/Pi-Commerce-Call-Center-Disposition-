@@ -20,12 +20,12 @@ export async function GET(req: Request) {
   const sql=db();
 
   const rows=await sql`
-    SELECT c.customer_id,c.attempt_number,c.call_seq,c.source_type,c.status_raw,c.remark,
+    SELECT COALESCE(c.customer_id,'lead:'||c.lead_id::text) AS customer_id,c.attempt_number,c.call_seq,c.source_type,c.status_raw,c.remark,
            c.l0_label_snapshot,c.l1_label_snapshot,c.l2_label_snapshot,c.call_date,c.call_date::text AS call_day,c.plan_amount_inr,c.whatsapp_handoff,
            COALESCE(a.name,c.agent_name_raw,'Unknown') AS agent_name,
            EXISTS (
              SELECT 1 FROM calls p
-             WHERE p.customer_id=c.customer_id
+             WHERE (p.customer_id=c.customer_id OR (c.customer_id IS NULL AND p.lead_id=c.lead_id AND p.customer_id IS NULL))
                AND (p.call_date < c.call_date OR (p.call_date=c.call_date AND (p.call_seq < c.call_seq OR (p.call_seq=c.call_seq AND p.attempt_number<c.attempt_number))))
            ) AS had_prior_call
     FROM calls c
