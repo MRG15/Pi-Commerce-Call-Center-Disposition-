@@ -62,7 +62,7 @@ const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
-  T1_RENEW:{name:'tone_renew_test_ff',body:['merchant_name','impressions'],callbackButton:'0'},
+  T1_RENEW:{name:'tone_renew_test_nocl',body:['merchant_name','impressions'],callbackButton:'0'},
   // T2–T5 are not mapped yet.
 };
 // Test stage for CSM templates: while a template has testers here it goes only to them (once each,
