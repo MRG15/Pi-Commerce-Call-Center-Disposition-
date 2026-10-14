@@ -7,6 +7,7 @@ import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
 import { downloadCsv,type CsvColumn } from '@/lib/csv';
 import { multiSort,NO_SORT,type SortState } from '@/lib/sort';
 import SortPicker from '@/components/SortPicker';
+import { getJson } from '@/lib/get-json';
 
 type Node={id:string;code:string;label:string;level:number;parent_id:string|null};
 type View='queues'|'callbacks'|'reqcb'|'metrics'|'notes'|'allocation';
@@ -64,14 +65,15 @@ export default function CsmConsole(){
     setLoading(false);
   })();},[]);
   // The merchant list (assignments, reassignments, the morning sync) stays current without a page
-  // reload: every 2 minutes while the window is in use and on returning to it.
-  useEffect(()=>{if(!user)return;const f=async()=>{if(document.visibilityState!=='visible')return;try{const r=await fetch('/api/csm/merchants',{cache:'no-store'});if(r.ok)setData(await r.json());}catch{}};const t=setInterval(()=>{if(document.hasFocus())f();},120000);
+  // reload: every 2 minutes while the window is in use and on returning to it, it checks a tiny
+  // fingerprint and re-downloads the list only when something changed.
+  useEffect(()=>{if(!user)return;let ver='';const f=async()=>{if(document.visibilityState!=='visible')return;try{const v=await fetch('/api/csm/merchants?version=1',{cache:'no-store'});if(!v.ok)return;const nv=String((await v.json()).v||'');if(!ver||nv===ver){ver=nv;return;}ver=nv;const r=await fetch('/api/csm/merchants',{cache:'no-store'});if(r.ok)setData(await r.json());}catch{}};const t=setInterval(()=>{if(document.hasFocus())f();},120000);
    document.addEventListener('visibilitychange',f);window.addEventListener('focus',f);
    return()=>{clearInterval(t);document.removeEventListener('visibilitychange',f);window.removeEventListener('focus',f);};},[user]);
 
   async function openMerchant(id:string){
     setDetailLoading(true);setError('');
-    const r=await fetch('/api/csm/merchants/'+encodeURIComponent(id),{cache:'no-store'});const j=await r.json();
+    const r=await getJson('/api/csm/merchants/'+encodeURIComponent(id));const j=r.j;
     setDetailLoading(false);
     if(!r.ok){setError(j.error||'Could not open merchant');return;}
     setSelected(j);

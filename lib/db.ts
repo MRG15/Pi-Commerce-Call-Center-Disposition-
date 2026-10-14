@@ -10,6 +10,9 @@ export function db() {
       ssl: isLocal ? false : 'require',
       max: 5,
       idle_timeout: 20,
+      // Recycle connections every few minutes so a socket left stale while the function was
+      // frozen isn't reused (a query on it can hang).
+      max_lifetime: 60 * 5,
       connect_timeout: 20,
       // No server-side prepared statements: a cached plan breaks with "cached plan must not
       // change result type" when a migration adds columns while connections are open, and

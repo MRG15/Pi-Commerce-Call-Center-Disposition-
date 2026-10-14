@@ -22,6 +22,8 @@ export async function GET(req:Request){
       c.sub_status,c.sub_cancelled_at::text AS sub_cancelled_at,c.sub_credits::float8 AS sub_credits,c.sub_plan_name,c.sold_by_employee_code,c.sub_plan_amount::float8 AS sub_plan_amount,c.sub_expiry_date,c.last_completed_stage,c.reopened_at,c.reopen_reason,
       (SELECT so.rank FROM onboarding_stage_order so WHERE so.stage=c.last_completed_stage) AS stage_rank,
       a.name AS assigned_name,
+      -- Sold by the Merchant Lending (on-ground) team: shown in yellow so onboarding prioritises it.
+      EXISTS(SELECT 1 FROM merchant_lending_ecodes ml WHERE ml.employee_code=btrim(c.sold_by_employee_code)) AS merchant_lending,
       m.merchant_name,m.phone_number,m.category,m.sub_category,
       GREATEST(0,(
         CASE WHEN ${filterByDate} THEN ${to||null}::date ELSE (now() AT TIME ZONE 'Asia/Kolkata')::date END

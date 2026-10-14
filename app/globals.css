@@ -64,3 +64,5 @@
 .req-cb-list{display:flex;flex-direction:column;gap:6px}.req-cb-list button{text-align:left;border:1px solid var(--line,#e5e7eb);background:#fff;border-radius:8px;padding:9px 11px;cursor:pointer}.req-cb-list button:hover{border-color:#94a3b8}.req-cb-list strong{display:block;color:#0f172a}.req-cb-list span{display:block;font-size:12px;color:#4b5563;margin-top:2px}
 .lg-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.lg-tag{font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;background:#eef2ff;color:#3730a3}.lg-tag.called{background:#ecfdf5;color:#047857}.lg-tag.repeat{background:#fff7ed;color:#c2410c}.lg-tag.muted{background:#f3f4f6;color:#6b7280}.lg-info{border-color:#c7d2fe}
 .dl-row{display:flex;gap:8px;flex-wrap:wrap}a.csv-btn{text-decoration:none;display:inline-block}
+/* Onboarding cases sold by the Merchant Lending team: yellow, to prioritise. */
+.case-list>button.ml{background:#fff4b8;border-color:#f2cf3d}.case-list>button.ml:hover,.case-list>button.ml.selected{background:#ffec8f;border-color:#e0b800}
