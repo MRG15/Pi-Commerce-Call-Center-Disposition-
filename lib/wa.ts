@@ -62,11 +62,12 @@ const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
+  // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
   T1_RENEW:{name:'tone_renew_test_nocl',body:['merchant_name','impressions'],callbackButton:'1'},
-  T2_ENDED_FREE:{name:'ttwo_ended_free_test',body:['merchant_name','impressions','credits'],callbackButton:'0'},
-  T3_ENDED_TOPUP:{name:'tthree_ended_topup_test',body:['merchant_name','impressions','credits'],callbackButton:'0'},
-  T4_ENDING_FREE:{name:'tfour_ending_free_nocl',body:['merchant_name','ad_end_date','credits'],callbackButton:'0'},
-  T5_ENDING_TOPUP:{name:'tfive_ending_topup_test',body:['merchant_name','ad_end_date','credits'],callbackButton:'0'},
+  T2_ENDED_FREE:{name:'ttwo_ended_free_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
+  T3_ENDED_TOPUP:{name:'tthree_ended_topup_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
+  T4_ENDING_FREE:{name:'tfour_ending_free_nocl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
+  T5_ENDING_TOPUP:{name:'tfive_ending_topup_test',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
 };
 // Test stage for CSM templates: while a template has testers here it goes only to them (once each,
 // with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.
