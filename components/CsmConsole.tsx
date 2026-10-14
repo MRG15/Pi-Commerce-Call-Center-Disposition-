@@ -65,8 +65,9 @@ export default function CsmConsole(){
     setLoading(false);
   })();},[]);
   // The merchant list (assignments, reassignments, the morning sync) stays current without a page
-  // reload: every 2 minutes while the window is in use and on returning to it.
-  useEffect(()=>{if(!user)return;const f=async()=>{if(document.visibilityState!=='visible')return;try{const r=await fetch('/api/csm/merchants',{cache:'no-store'});if(r.ok)setData(await r.json());}catch{}};const t=setInterval(()=>{if(document.hasFocus())f();},120000);
+  // reload: every 2 minutes while the window is in use and on returning to it, it checks a tiny
+  // fingerprint and re-downloads the list only when something changed.
+  useEffect(()=>{if(!user)return;let ver='';const f=async()=>{if(document.visibilityState!=='visible')return;try{const v=await fetch('/api/csm/merchants?version=1',{cache:'no-store'});if(!v.ok)return;const nv=String((await v.json()).v||'');if(!ver||nv===ver){ver=nv;return;}ver=nv;const r=await fetch('/api/csm/merchants',{cache:'no-store'});if(r.ok)setData(await r.json());}catch{}};const t=setInterval(()=>{if(document.hasFocus())f();},120000);
    document.addEventListener('visibilitychange',f);window.addEventListener('focus',f);
    return()=>{clearInterval(t);document.removeEventListener('visibilitychange',f);window.removeEventListener('focus',f);};},[user]);
 
