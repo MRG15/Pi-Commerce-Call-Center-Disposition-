@@ -7,6 +7,7 @@ import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
 import { downloadCsv,type CsvColumn } from '@/lib/csv';
 import { multiSort,NO_SORT,type SortState } from '@/lib/sort';
 import SortPicker from '@/components/SortPicker';
+import { getJson } from '@/lib/get-json';
 
 type Node={id:string;code:string;label:string;level:number;parent_id:string|null};
 type View='queues'|'callbacks'|'reqcb'|'metrics'|'notes'|'allocation';
@@ -71,7 +72,7 @@ export default function CsmConsole(){
 
   async function openMerchant(id:string){
     setDetailLoading(true);setError('');
-    const r=await fetch('/api/csm/merchants/'+encodeURIComponent(id),{cache:'no-store'});const j=await r.json();
+    const r=await getJson('/api/csm/merchants/'+encodeURIComponent(id));const j=r.j;
     setDetailLoading(false);
     if(!r.ok){setError(j.error||'Could not open merchant');return;}
     setSelected(j);

@@ -7,6 +7,7 @@ import { PLANS, plansRequiredOn, todayIst } from '@/lib/plans';
 import { downloadCsv, type CsvColumn } from '@/lib/csv';
 import { multiSort, NO_SORT, type SortState } from '@/lib/sort';
 import SortPicker from '@/components/SortPicker';
+import { getJson } from '@/lib/get-json';
 
 // CSV of the cases on screen (current bucket, view period, onboarder and search).
 const istTime=(v:any)=>v?new Date(v).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):'';
@@ -103,7 +104,7 @@ export default function OnboardingConsole(){
  const stageOptions=[...new Map(bucketRows.filter(c=>c.last_completed_stage).map(c=>[c.last_completed_stage,c.stage_rank])).entries()].sort((a:any,b:any)=>(a[1]??1e9)-(b[1]??1e9)||String(a[0]).localeCompare(String(b[0]))).map(x=>x[0] as string);
  const filteredRows=bucketRows.filter(c=>(!subPill||subPillOf(c)===subPill)&&(!stageFilter||c.last_completed_stage===stageFilter));
  const shown=multiSort(filteredRows,[caseSort.by&&{value:(c:any)=>caseSortValue(c,caseSort.by as CaseSort),dir:caseSort.dir},caseSort.by&&caseSort.by2&&{value:(c:any)=>caseSortValue(c,caseSort.by2 as CaseSort),dir:caseSort.dir2}].filter(Boolean) as any);
- async function openCase(id:string){setError('');const r=await fetch('/api/onboarding/cases/'+id,{cache:'no-store'});const j=await r.json();if(!r.ok){setError(j.error||'Could not open case');return;}setSelected(j);setL0('');setL1('');setL2('');setRemark('');setCbDate('');setCbTime('');setTopUp('');setPlan('');}
+ async function openCase(id:string){setError('');const r=await getJson('/api/onboarding/cases/'+id);const j=r.j;if(!r.ok){setError(j.error||'Could not open case');return;}setSelected(j);setL0('');setL1('');setL2('');setRemark('');setCbDate('');setCbTime('');setTopUp('');setPlan('');}
  async function refreshCurrentView(){await applyView(viewPeriod,viewAgent,viewFrom,viewTo);}
  async function save(){if(!selected?.case||!l0)return;const partialTechnicalCallback=l1==='OB_TECHNICAL'&&Boolean(cbDate)!==Boolean(cbTime);if(partialTechnicalCallback){setError('Enter both callback date and time, or leave both blank for a technical issue.');return;}if(l0==='OB_ADDITIONAL_TOPUP'&&(topUp.trim()===''||Number(topUp)<=0)){setError('Enter the additional top-up amount.');return;}setSaving(true);setError('');const id=selected.case.id;const r=await fetch('/api/onboarding/events',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({caseId:id,l0Code:l0,l1Code:l1||null,l2Code:l2||null,remark:remark||null,callbackDate:callbackAvailable&&cbDate?cbDate:null,callbackTime:callbackAvailable&&cbTime?cbTime:null,topUpAmount:topUp.trim()===''?null:topUp,planCode:(l0==='OB_SUBS_RENEWED'||l0==='OB_PLAN_UPGRADED')&&plan?plan:null,currentPlan:l0==='OB_PLAN_UPGRADED'?upCurrent:null})});const j=await r.json();setSaving(false);if(!r.ok){setError(j.error||'Could not save');return;}refreshCallbackRequests();await refreshCurrentView();await openCase(id);}
  async function resolveTech(id:string){const caseId=selected.case.id;const r=await fetch('/api/onboarding/events',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({caseId,resolveTechnicalCaseId:id,remark:'Technical issue resolved'})});if(r.ok){await refreshCurrentView();await openCase(caseId);}else setError((await r.json()).error||'Could not resolve technical issue');}
