@@ -51,14 +51,14 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
   `;
   // Top-ups credited to whoever logged them: amount entered on Ads Live, or an Additional Top-up.
   const topUps=await sql`
-    SELECT e.event_date::text AS date,COALESCE(a.name,e.agent_name_raw,'Unknown') AS person,e.top_up_amount_inr::float8 AS amount,e.customer_id
+    SELECT e.event_date::text AS date,COALESCE(a.name,e.agent_name_raw,'Unknown') AS person,e.top_up_amount_inr::float8 AS amount,e.customer_id,'Top-up' AS kind
     FROM onboarding_events e LEFT JOIN agents a ON a.id=e.agent_id
     WHERE e.l0_code IN ('OB_ADS_LIVE','OB_ADDITIONAL_TOPUP')
       AND e.top_up_amount_inr>0
       AND e.event_date BETWEEN ${from}::date AND ${to}::date
     UNION ALL
     -- Plan Upgraded in Onboarding / CSM: the upgrade value is priced like a top-up for whoever logged it.
-    SELECT e.event_date::text,COALESCE(a.name,e.agent_name_raw,'Unknown'),e.upgrade_value_inr::float8,e.customer_id
+    SELECT e.event_date::text,COALESCE(a.name,e.agent_name_raw,'Unknown'),e.upgrade_value_inr::float8,e.customer_id,'Plan upgrade'
     FROM onboarding_events e LEFT JOIN agents a ON a.id=e.agent_id
     WHERE e.l0_code='OB_PLAN_UPGRADED' AND e.upgrade_value_inr>0
       AND e.event_date BETWEEN ${from}::date AND ${to}::date
@@ -112,17 +112,17 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
   for(const c of adsLive) raw.push({section:'Ads live case',date:c.date,person:c.person,customer:String(c.customer_id||'')});
   for(const o of onboarder) if(o.cases>0) raw.push({section:'Ads live daily incentive',date:o.date,person:o.person,detail:o.plan,count:o.cases,incentive:o.casePay});
   const eligibleOb=(p:string,d:string)=>earnsOnboarding?earnsOnboarding(p,d):isMember(ONBOARDER_ROSTER,p,d);
-  for(const t of [...topUps.map((x:any)=>({date:x.date,person:x.person,amount:Number(x.amount),customerId:String(x.customer_id||''),note:''})),...BACKFILLED_TOP_UPS]){
+  for(const t of [...topUps.map((x:any)=>({date:x.date,person:x.person,amount:Number(x.amount),customerId:String(x.customer_id||''),note:'',kind:String(x.kind||'Top-up')})),...BACKFILLED_TOP_UPS.map(b=>({...b,kind:'Top-up'}))]){
     const plan=planOn(ONBOARDER_PLANS,t.date);
     if(t.date<from||t.date>to||!plan) continue;
     const ok=eligibleOb(t.person,t.date);
-    raw.push({section:'Top-up',date:t.date,person:t.person,customer:t.customerId||t.note||'',detail:ok?'':'Not eligible that day',amount:t.amount,incentive:ok?topUpPay(plan,t.amount):0});
+    raw.push({section:'Top-up',date:t.date,person:t.person,customer:t.customerId||t.note||'',detail:t.kind+(ok?'':' · not eligible that day'),amount:t.amount,incentive:ok?topUpPay(plan,t.amount):0});
   }
   for(const t of renewals){
     const plan=planOn(ONBOARDER_PLANS,t.date);
     if(t.date<from||t.date>to||!plan?.paysRenewals) continue;
     const ok=eligibleOb(t.credited_to,t.date);
-    raw.push({section:'Subscription renewal',date:t.date,person:t.credited_to,customer:String(t.customer_id||''),detail:ok?'':'Not eligible that day',amount:Number(t.plan_amount||0),incentive:ok?topUpPay(plan,Number(t.plan_amount||0)):0});
+    raw.push({section:'Subscription renewal',date:t.date,person:t.credited_to,customer:String(t.customer_id||''),detail:'Subscription renewal'+(ok?'':' · not eligible that day'),amount:Number(t.plan_amount||0),incentive:ok?topUpPay(plan,Number(t.plan_amount||0)):0});
   }
   raw.sort((a,b)=>a.person.localeCompare(b.person)||a.section.localeCompare(b.section)||a.date.localeCompare(b.date));
   // Each person's team on the last day of the period (Sales / Onboarding / CSM).
