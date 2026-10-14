@@ -6,7 +6,8 @@
  *        PI_COMMERCE_AD_CONVERSIONS_SYNC_URL  https://pi-commerce-call-center-disposition.vercel.app/api/internal/ad-conversions-sync
  *        PI_COMMERCE_SUB_RAW_SYNC_SECRET      (the same secret the Sub Raw / CSM syncs use)
  *   2. Run setupAdConversionsTrigger once (approve the permissions). It sends the tab now and then
- *      every day at about 11 AM. Run syncAdConversions any time to push the latest numbers.
+ *      every day at about 9:40 AM, alongside the CSM sync (set the Apps Script time zone to
+ *      Asia/Kolkata in Project Settings). Run syncAdConversions any time to push the latest numbers.
  *
  * Reads headers customer_id, ad_id, ad_name and conversations (column AC) from the "data" tab.
  */
@@ -17,7 +18,7 @@ function setupAdConversionsTrigger() {
   ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === 'syncAdConversions')
     .forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('syncAdConversions').timeBased().everyDays(1).atHour(11).create();
+  ScriptApp.newTrigger('syncAdConversions').timeBased().everyDays(1).atHour(9).nearMinute(40).create();
   syncAdConversions();
 }
 
