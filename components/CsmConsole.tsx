@@ -229,10 +229,10 @@ function MerchantDetail({data,nodes,admin,csms,row,onSaved}:{data:any;nodes:Node
 
     <div className="section-label subhead">Ads ({data.ads.length})</div>
     {data.ads.length===0?<div className="empty">No ads in the latest sync.</div>:<div className="table-scroll"><table className="split leads-table csm-ads">
-      <thead><tr><th>Creative</th><th>Status</th><th>Start</th><th>End</th><th>Budget</th><th>Spend</th><th>Impr.</th><th>Clicks</th><th>CTR</th><th>Reach</th><th>Conversions</th></tr></thead>
+      <thead><tr><th>Creative</th><th>Status</th><th>Start</th><th>End</th><th>Budget</th><th>Spend</th><th>Impr.</th><th>Clicks</th><th>CTR</th><th>Reach</th><th>Conversations</th></tr></thead>
       <tbody>{data.ads.map((a:any,i:number)=><tr key={i}><td className="remark-cell">{a.creative_name||'—'}{a.description&&<div className="note csm-ad-desc">{a.description}</div>}</td><td>{a.ad_status}</td><td>{fmtDay(a.start_date)}</td><td>{fmtDay(a.end_date)}</td><td>{money(a.budget)}</td><td>{money(a.spend)}</td><td>{num(a.impressions)}</td><td>{num(a.clicks)}</td><td>{a.ctr!=null?Number(a.ctr).toFixed(2)+'%':'—'}</td><td>{num(a.reach)}</td><td>{a.conversions!=null?num(a.conversions):'—'}</td></tr>)}</tbody>
     </table></div>}
-    {data.ads.some((a:any)=>a.conversions_as_on)&&<div className="note">Conversions as on {new Date(data.ads.map((a:any)=>a.conversions_as_on).filter(Boolean).sort().at(-1)).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})} (Ad performance analysis sheet).</div>}
+    {data.ads.some((a:any)=>a.conversions_as_on)&&<div className="note">Conversations as on {new Date(data.ads.map((a:any)=>a.conversions_as_on).filter(Boolean).sort().at(-1)).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})} (Ad performance analysis sheet).</div>}
 
     <div className="section-label subhead">Log Call</div>
     {!c?<div className="empty">This merchant has no onboarding case in the portal, so calls can't be logged yet. Ask an onboarding admin to add the case.</div>:
