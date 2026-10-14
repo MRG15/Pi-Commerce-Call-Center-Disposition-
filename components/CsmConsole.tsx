@@ -63,6 +63,11 @@ export default function CsmConsole(){
     if(d.ok)setNodes((await d.json()).nodes||[]);
     setLoading(false);
   })();},[]);
+  // The merchant list (assignments, reassignments, the morning sync) stays current without a page
+  // reload: every 2 minutes while the window is in use and on returning to it.
+  useEffect(()=>{if(!user)return;const f=async()=>{if(document.visibilityState!=='visible')return;try{const r=await fetch('/api/csm/merchants',{cache:'no-store'});if(r.ok)setData(await r.json());}catch{}};const t=setInterval(()=>{if(document.hasFocus())f();},120000);
+   document.addEventListener('visibilitychange',f);window.addEventListener('focus',f);
+   return()=>{clearInterval(t);document.removeEventListener('visibilitychange',f);window.removeEventListener('focus',f);};},[user]);
 
   async function openMerchant(id:string){
     setDetailLoading(true);setError('');
