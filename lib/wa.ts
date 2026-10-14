@@ -62,8 +62,18 @@ const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
-  // CSM templates (T1–T5) are not mapped: their Request a callback taps did not reach the portal.
+  T1_RENEW:{name:'tone_renew_test_ff',body:['merchant_name','impressions'],callbackButton:'0'},
+  // T2–T5 are not mapped yet.
 };
+// Test stage for CSM templates: while a template has testers here it goes only to them (once each,
+// with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.
+// Their taps are logged against TEST_CUSTOMER (Madhav's test merchant) in the CSM Req Call Back pane.
+export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={
+  T1_RENEW:[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}],
+};
+const TEST_CUSTOMER='518726118';
+const TEST_VARIABLES:Record<string,string>={impressions:'12,450',credits:'₹2,500',ad_end_date:fmtDate(new Date(Date.now()+86400000).toISOString())};
+const csmLive=(t:WaTemplate)=>waReady(t)&&!CSM_WA_TESTERS[t];
 export const waReady=(t:WaTemplate)=>{const x=WA_TEMPLATES[t];return Boolean(process.env.PI_WA_API_KEY&&x&&(x.headerImage===undefined||x.headerImage));};
 // Test mode: when PI_WA_TEST_CUSTOMERS is set (comma-separated customer IDs), only those merchants
 // get messages; everyone else is skipped.
@@ -147,7 +157,7 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
 export const CSM_AUTO_SEND=true;
 export async function runCsmWaTriggers(sql:any,runId:number){
   if(!CSM_AUTO_SEND) return {queued:0,note:'CSM automatic sending is off'};
-  const ready={T1:waReady('T1_RENEW'),ENDED:waReady('T2_ENDED_FREE')&&waReady('T3_ENDED_TOPUP'),ENDING:waReady('T4_ENDING_FREE')&&waReady('T5_ENDING_TOPUP')};
+  const ready={T1:csmLive('T1_RENEW'),ENDED:csmLive('T2_ENDED_FREE')&&csmLive('T3_ENDED_TOPUP'),ENDING:csmLive('T4_ENDING_FREE')&&csmLive('T5_ENDING_TOPUP')};
   if(!ready.T1&&!ready.ENDED&&!ready.ENDING) return {queued:0,note:'CSM templates not configured'};
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
   const rows=await sql`
@@ -175,8 +185,9 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     const base={workspace:'csm' as const,customerId:String(r.customer_id),phone:r.phone};
     if(r.status==='CANCELLED'||r.status==='EXPIRED'){
       if(!ready.T1) continue;
+      // Once per lapse and platform template: a new T1 template also goes to merchants who got an earlier one.
       const cycle=String(r.due||r.cancelled_at||r.status);
-      const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
+      const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${WA_TEMPLATES.T1_RENEW?.name}|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
         variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)}});
       if(id) ids.push(id);
       continue;
@@ -205,7 +216,8 @@ export async function runCsmWaTriggers(sql:any,runId:number){
 // the same set of live templates. Adding a template later processes it again; the once-per-cycle
 // keys stop anyone getting the same message twice.
 export async function ensureCsmWaRun(sql:any){
-  const live=(['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'] as WaTemplate[]).filter(waReady).join(',');
+  await sendCsmTests(sql);
+  const live=(['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'] as WaTemplate[]).filter(csmLive).join(',');
   if(!CSM_AUTO_SEND||!live) return;
   const claim=await sql`
     UPDATE csm_sync_runs SET wa_templates=${live}
@@ -219,4 +231,18 @@ export async function ensureCsmWaRun(sql:any){
 export async function resolveCallbackRequests(sql:any,workspace:WaWorkspace,customerId:string|null,leadId?:string|null){
   if(customerId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND customer_id=${customerId} AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
   if(leadId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND lead_id=${leadId}::uuid AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
+}
+
+// Sends each CSM template in its test stage to its testers, once per tester and platform template.
+async function sendCsmTests(sql:any){
+  const ids:number[]=[];
+  for(const [t,testers] of Object.entries(CSM_WA_TESTERS) as [WaTemplate,{name:string;phone:string}[]][]){
+    if(!waReady(t)) continue;
+    for(const x of testers||[]){
+      const id=await queueWa(sql,{template:t,workspace:'csm',customerId:TEST_CUSTOMER,phone:x.phone,sourceRef:`test:${x.name}`,
+        dedupeKey:`TEST|${t}|${WA_TEMPLATES[t]!.name}|${x.phone}`,variables:{...TEST_VARIABLES,merchant_name:x.name}});
+      if(id) ids.push(id);
+    }
+  }
+  await sendQueuedWa(sql,ids);
 }
