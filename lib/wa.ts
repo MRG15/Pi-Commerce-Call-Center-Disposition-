@@ -69,7 +69,7 @@ export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];c
 // with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.
 // Their taps are logged against TEST_CUSTOMER (Madhav's test merchant) in the CSM Req Call Back pane.
 export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={
-  T1_RENEW:[{name:'Madhav',phone:'+918383059253'}],
+  T1_RENEW:[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}],
 };
 const TEST_CUSTOMER='518726118';
 const TEST_VARIABLES:Record<string,string>={impressions:'12,450',credits:'₹2,500',ad_end_date:fmtDate(new Date(Date.now()+86400000).toISOString())};
@@ -185,8 +185,9 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     const base={workspace:'csm' as const,customerId:String(r.customer_id),phone:r.phone};
     if(r.status==='CANCELLED'||r.status==='EXPIRED'){
       if(!ready.T1) continue;
+      // Once per lapse and platform template: a new T1 template also goes to merchants who got an earlier one.
       const cycle=String(r.due||r.cancelled_at||r.status);
-      const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
+      const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${WA_TEMPLATES.T1_RENEW?.name}|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
         variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)}});
       if(id) ids.push(id);
       continue;
