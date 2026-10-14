@@ -14,6 +14,16 @@ export async function GET(req:Request){
   if(!ok[0]?.ok) return NextResponse.json({visible:false,leads:[]});
   const admin=isWorkspaceAdmin(user,'seller');
   const inRoster=Boolean((await sql`SELECT 1 FROM leadgen_roster WHERE agent_id=${user.id}::uuid`)[0]);
+  // ?version=1: a tiny fingerprint (leads, assignments, dispositions) so the pane only re-downloads
+  // the list when something changed.
+  if(new URL(req.url).searchParams.get('version')){
+    const v=await sql`
+      SELECT concat_ws('|',${inRoster},count(*),max(l.created_at),max(l.assigned_at),max(l.customer_id),
+        (SELECT max(c.created_at) FROM calls c WHERE c.source_type='new_call' AND c.created_at>now()-interval '2 days' AND (${admin} OR c.agent_id=${user.id}::uuid))) AS v
+      FROM leadgen_leads l WHERE ${admin} OR l.assigned_to=${user.id}::uuid
+    `;
+    return NextResponse.json({v:String(v[0]?.v||'')});
+  }
   const leads=await sql`
     SELECT l.id,l.phone,l.name,l.submitted_at,l.last_submitted_at,l.submissions,l.campaign_name,l.adset_name,l.ad_name,l.form_name,l.platform,
       l.customer_id,l.assigned_to,l.assigned_at,l.is_repeat,l.already_called,a.name AS assigned_name,m.merchant_name,

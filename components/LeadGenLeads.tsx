@@ -1,5 +1,5 @@
 'use client';
-import { useCallback,useEffect,useState } from 'react';
+import { useCallback,useEffect,useRef,useState } from 'react';
 
 // Lead Gen Ads (Seller workspace): Meta lead-form leads assigned to this seller (all leads for
 // Seller Admins). Refreshes every 30 seconds while the window is in use and on returning to it,
@@ -8,14 +8,18 @@ const fmt=(t?:string)=>t?new Date(t).toLocaleString('en-IN',{timeZone:'Asia/Kolk
 
 export function useLeadGen(){
  const [state,setState]=useState<any>({visible:false,admin:false,leads:[]});
- const load=useCallback(async()=>{if(document.visibilityState!=='visible')return;try{const r=await fetch('/api/leadgen/leads',{cache:'no-store'});if(r.ok)setState(await r.json());}catch{}},[]);
+ const ver=useRef('');
+ // Checks a tiny fingerprint first and re-downloads the leads only when something changed.
+ const load=useCallback(async(force?:any)=>{if(document.visibilityState!=='visible')return;try{
+  if(force!==true){const v=await fetch('/api/leadgen/leads?version=1',{cache:'no-store'});if(v.ok){const {v:nv}=await v.json();if(nv&&nv===ver.current)return;ver.current=nv;}}
+  const r=await fetch('/api/leadgen/leads',{cache:'no-store'});if(r.ok)setState(await r.json());}catch{}},[]);
  useEffect(()=>{
   load(); const t=setInterval(()=>{if(document.hasFocus())load();},30000);
   document.addEventListener('visibilitychange',load); window.addEventListener('focus',load);
   return()=>{clearInterval(t);document.removeEventListener('visibilitychange',load);window.removeEventListener('focus',load);};
  },[load]);
  const fresh=(state.leads||[]).filter((l:any)=>!l.calls&&(!state.admin||l.assigned_to)).length;
- return {...state,fresh,reload:load};
+ return {...state,fresh,reload:()=>load(true)};
 }
 
 function Tags({l}:{l:any}){

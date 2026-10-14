@@ -29,7 +29,7 @@ export async function ingestLeads(sql:any,rows:SheetLead[]){
     .filter(x=>x.meta&&x.phone&&!Number.isNaN(x.at.getTime()))
     .sort((a,b)=>a.at.getTime()-b.at.getTime());
   const seen=new Set<string>();
-  let created=0,merged=0,skipped=0;
+  let created=0,merged=0,skipped=0;const newIds:string[]=[];
   for(const x of parsed){
     if(seen.has(x.meta!)){skipped++;continue;}
     seen.add(x.meta!);
@@ -49,14 +49,17 @@ export async function ingestLeads(sql:any,rows:SheetLead[]){
       RETURNING id
     `;
     await sql`INSERT INTO leadgen_meta_ids(meta_lead_id,lead_id) VALUES(${x.meta},${ins[0].id}) ON CONFLICT DO NOTHING`;
-    created++;
+    newIds.push(String(ins[0].id));created++;
   }
-  return {created,merged,skipped};
+  return {created,merged,skipped,newIds};
 }
 
 // Gives unlinked leads the Cust ID of the merchant with that phone, and moves their lead-only
 // dispositions onto the Cust ID (attempt numbers continue after the merchant's own calls).
-export async function linkLeadsToCustomers(sql:any){
+// Merchant phones only change with the daily merchant sync, so the 5-minute lead sync checks just
+// the leads it brought in (onlyIds) and the merchant sync re-checks every unlinked lead.
+export async function linkLeadsToCustomers(sql:any,onlyIds?:string[]){
+  if(onlyIds&&!onlyIds.length) return 0;
   const matches=await sql`
     SELECT l.id,l.phone,m.customer_id FROM leadgen_leads l
     JOIN LATERAL (
@@ -64,7 +67,7 @@ export async function linkLeadsToCustomers(sql:any){
       WHERE active=TRUE AND right(regexp_replace(COALESCE(phone_number,''),'[^0-9]','','g'),10)=l.phone
       ORDER BY last_synced_at DESC NULLS LAST,customer_id LIMIT 1
     ) m ON TRUE
-    WHERE l.customer_id IS NULL
+    WHERE l.customer_id IS NULL AND (${onlyIds?1:0}=0 OR l.id=ANY(${onlyIds||[]}::uuid[]))
   `;
   for(const x of matches){
     await sql.begin(async(tx:any)=>{
