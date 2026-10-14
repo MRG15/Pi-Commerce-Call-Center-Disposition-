@@ -57,7 +57,7 @@ export default function CsmConsole(){
   }
   useEffect(()=>{(async()=>{
     const a=await fetch('/api/auth/access',{cache:'no-store'});if(!a.ok){router.replace('/login');return;}
-    const u=(await a.json()).user;if(!u.isSuperAdmin&&!u.access?.csm){router.replace('/');return;}
+    const u=(await a.json()).user;if(!u.isSuperAdmin&&!u.access?.csm){router.replace(u.access?.incentives&&!u.access?.seller&&!u.access?.onboarding?'/analytics?workspace=incentives':'/');return;}
     setUser(u);
     const [d]=await Promise.all([fetch('/api/csm/dispositions',{cache:'no-store'}),loadMerchants()]);
     if(d.ok)setNodes((await d.json()).nodes||[]);
