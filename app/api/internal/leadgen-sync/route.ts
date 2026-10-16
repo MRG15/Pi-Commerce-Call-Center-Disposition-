@@ -1,7 +1,8 @@
 import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { ingestLeads,linkLeadsToCustomers,assignUnassignedLeads } from '@/lib/leadgen';
+import { retryOnboardingNoPhone } from '@/lib/wa';
+import { ingestLeads,linkLeadsToCustomers,linkAfterMerchantSync,assignUnassignedLeads } from '@/lib/leadgen';
 
 // Lead Gen Ads sheet → portal (scripts/leadgen-sync.gs, every 5 minutes). Takes the sheet's new
 // rows, links the new leads to Cust IDs by phone and assigns any unassigned leads. (Older
@@ -23,7 +24,11 @@ export async function POST(req:Request){
   if(rows.length>1000) return NextResponse.json({error:'Send at most 1000 rows per request'},{status:400});
   const sql=db();
   const {newIds,...ingest}=await ingestLeads(sql,rows);
-  const linked=await linkLeadsToCustomers(sql,newIds);
+  // New leads now; every unlinked lead once after each merchant sync (if that sync didn't already).
+  const linked=await linkLeadsToCustomers(sql,newIds)
+    +await linkAfterMerchantSync(sql).catch((e:any)=>{console.error('lead linking after merchant sync failed',e);return 0;});
   const assigned=await assignUnassignedLeads(sql);
+  // Rides on this 5-minute trigger: yesterday's onboarding WhatsApps that had no phone go out from 9 AM.
+  await retryOnboardingNoPhone(sql).catch((e:any)=>console.error('onboarding no-phone retry failed',e));
   return NextResponse.json({ok:true,received:rows.length,...ingest,linked,assigned});
 }

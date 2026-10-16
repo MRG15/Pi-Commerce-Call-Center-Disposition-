@@ -147,6 +147,40 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
   if(id) await sendQueuedWa(sql,[id]);
 }
 
+// Onboarding Not Connected messages skipped for "No phone number" (a case CT created that day is
+// called before the 2:30 AM merchant sync brings the merchant's phone): sent the next morning from
+// 9 AM, once the phone is known, if the case is still open and its latest call is still Not
+// Connected. One message per merchant. Runs from the 5-minute lead sync between 9 and 11 AM IST.
+export async function retryOnboardingNoPhone(sql:any){
+  const istHour=new Date(Date.now()+330*60000).getUTCHours();
+  if(istHour<9||istHour>=11||!waReady('ONB_NOT_CONNECTED')) return 0;
+  const rows=await sql`
+    SELECT DISTINCT ON (w.customer_id) w.id,w.customer_id,w.variables,
+      array_agg(w.id) OVER (PARTITION BY w.customer_id) AS all_ids
+    FROM wa_messages w
+    JOIN LATERAL (SELECT id,current_status FROM onboarding_cases WHERE customer_id=w.customer_id ORDER BY created_at LIMIT 1) c ON TRUE
+    JOIN LATERAL (SELECT l0_code FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.source_type='new_event'
+                  ORDER BY e.event_time DESC,e.attempt_number DESC LIMIT 1) last ON TRUE
+    WHERE w.workspace='onboarding' AND w.template='ONB_NOT_CONNECTED' AND w.status='skipped' AND w.status_note='No phone number'
+      AND w.created_at>now()-interval '3 days'
+      AND (w.created_at AT TIME ZONE 'Asia/Kolkata')::date<(now() AT TIME ZONE 'Asia/Kolkata')::date
+      AND c.current_status='open' AND last.l0_code='OB_NOT_CONNECTED'
+    ORDER BY w.customer_id,w.created_at DESC
+  `;
+  const ids:number[]=[];
+  for(const r of rows){
+    const c=await merchantContact(sql,String(r.customer_id));
+    if(!waPhone(c.phone)) continue;
+    const others=(r.all_ids||[]).map(Number).filter((x:number)=>x!==Number(r.id));
+    if(others.length) await sql`UPDATE wa_messages SET status_note='No phone number (sent once the next morning)' WHERE id=ANY(${others})`;
+    await sql`UPDATE wa_messages SET phone=${c.phone},variables=${sql.json({...(r.variables||{}),merchant_name:r.variables?.merchant_name||c.name})},
+      status='queued',status_note='Phone from the night merchant sync; sent next morning' WHERE id=${r.id} AND status='skipped'`;
+    ids.push(Number(r.id));
+  }
+  await sendQueuedWa(sql,ids);
+  return ids.length;
+}
+
 // CSM, after each completed daily sync (latest snapshot `runId`), for merchants in the CSM panel:
 //   T1_RENEW         Expired / Cancelled, not renewed (once per lapse)
 //   T2/T3            ads ended (latest ad end date is today or yesterday), credits ≥ / < ₹1,000
