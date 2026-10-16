@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { retryOnboardingNoPhone } from '@/lib/wa';
+import { runDailyJobs } from '@/lib/onboarding-rebalance';
 import { ingestLeads,linkLeadsToCustomers,linkAfterMerchantSync,assignUnassignedLeads } from '@/lib/leadgen';
 
 // Lead Gen Ads sheet → portal (scripts/leadgen-sync.gs, every 5 minutes). Takes the sheet's new
@@ -30,5 +31,7 @@ export async function POST(req:Request){
   const assigned=await assignUnassignedLeads(sql);
   // Rides on this 5-minute trigger: yesterday's onboarding WhatsApps that had no phone go out from 9 AM.
   await retryOnboardingNoPhone(sql).catch((e:any)=>console.error('onboarding no-phone retry failed',e));
+  // Also the clock for once-a-day jobs: the 8:30 AM onboarding backlog rebalance.
+  await runDailyJobs(sql).catch((e:any)=>console.error('daily jobs failed',e));
   return NextResponse.json({ok:true,received:rows.length,...ingest,linked,assigned});
 }

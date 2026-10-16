@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { currentUserAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
 import { hashPassword } from '@/lib/password';
+import { joinTeamForAccess } from '@/lib/teams';
 
 async function managerState(user:any){
   const sql=db();
@@ -49,6 +50,8 @@ export async function POST(req:Request){
     if(onboarding) await sql`INSERT INTO workspace_access(agent_id,workspace,access_level) VALUES(${id}::uuid,'onboarding',${onboarding}) ON CONFLICT(agent_id,workspace) DO UPDATE SET access_level=EXCLUDED.access_level,updated_at=now()`;
     if(csm) await sql`INSERT INTO workspace_access(agent_id,workspace,access_level) VALUES(${id}::uuid,'csm',${csm}) ON CONFLICT(agent_id,workspace) DO UPDATE SET access_level=EXCLUDED.access_level,updated_at=now()`;
     if(incentivesAcc) await sql`INSERT INTO workspace_access(agent_id,workspace,access_level) VALUES(${id}::uuid,'incentives','agent') ON CONFLICT(agent_id,workspace) DO NOTHING`;
+    // Workspace access also puts them on that team from today (Incentive off).
+    for(const [ws,lvl] of [['seller',seller],['onboarding',onboarding],['csm',csm]] as const) await joinTeamForAccess(sql,String(id),ws,lvl?String(lvl):null,String(user.id)).catch(()=>{});
     return NextResponse.json({ok:true,id},{status:201});
   }catch(e:any){
     if(String(e?.message||'').includes('agents_username_key')) return NextResponse.json({error:'Username already exists.'},{status:409});
@@ -74,6 +77,9 @@ export async function PATCH(req:Request){
   if(body.onboardingAccess!==undefined){if(!manage.onboarding)return NextResponse.json({error:'Onboarding Admin access required.'},{status:403});if(body.onboardingAccess!==null&&!['agent','customer_success','admin'].includes(String(body.onboardingAccess)))return NextResponse.json({error:'Invalid Onboarding access level.'},{status:400});if(body.onboardingAccess===null)await sql`DELETE FROM workspace_access WHERE agent_id=${id}::uuid AND workspace='onboarding'`;else await sql`INSERT INTO workspace_access(agent_id,workspace,access_level) VALUES(${id}::uuid,'onboarding',${String(body.onboardingAccess)}) ON CONFLICT(agent_id,workspace) DO UPDATE SET access_level=EXCLUDED.access_level,updated_at=now()`;}
   if(body.csmAccess!==undefined){if(!manage.csm)return NextResponse.json({error:'CSM Admin access required.'},{status:403});if(body.csmAccess!==null&&!['agent','admin'].includes(String(body.csmAccess)))return NextResponse.json({error:'Invalid CSM access level.'},{status:400});if(body.csmAccess===null)await sql`DELETE FROM workspace_access WHERE agent_id=${id}::uuid AND workspace='csm'`;else await sql`INSERT INTO workspace_access(agent_id,workspace,access_level) VALUES(${id}::uuid,'csm',${String(body.csmAccess)}) ON CONFLICT(agent_id,workspace) DO UPDATE SET access_level=EXCLUDED.access_level,updated_at=now()`;}
   if(body.incentivesAccess!==undefined){if(!manage.global)return NextResponse.json({error:'Only a Super Admin can change Incentives access.'},{status:403});if(body.incentivesAccess)await sql`INSERT INTO workspace_access(agent_id,workspace,access_level) VALUES(${id}::uuid,'incentives','agent') ON CONFLICT(agent_id,workspace) DO NOTHING`;else await sql`DELETE FROM workspace_access WHERE agent_id=${id}::uuid AND workspace='incentives'`;}
+  // Workspace access given here also puts them on that team from today (Incentive off).
+  for(const [ws,v] of [['seller',body.sellerAccess],['onboarding',body.onboardingAccess],['csm',body.csmAccess]] as const)
+    if(v) await joinTeamForAccess(sql,id,ws,String(v),String(user.id)).catch((e:any)=>console.error('team join failed',e));
   if(typeof body.active==='boolean'){if(!manage.global&&!manage.seller&&!manage.onboarding&&!manage.csm)return NextResponse.json({error:'Admin access required.'},{status:403});await sql`UPDATE agents SET active=${body.active} WHERE id=${id}::uuid`;if(!body.active)await sql`DELETE FROM sessions WHERE agent_id=${id}::uuid`;}
   const afterRows=await sql`
     SELECT a.active,a.is_super_admin,
