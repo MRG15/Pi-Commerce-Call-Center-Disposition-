@@ -64,8 +64,6 @@ export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];c
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
   // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
   T1_RENEW:{name:'tone_renew_test_nocl',body:['merchant_name','impressions'],callbackButton:'1'},
-  // Candidate replacement for T1 (language "en"), sent to testers only; no rule uses it.
-  T1_RENEW_NEXT:{name:'renewww',body:['merchant_name','impressions'],callbackButton:'1',language:'en'},
   T2_ENDED_FREE:{name:'ttwo_ended_free_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T3_ENDED_TOPUP:{name:'tthree_ended_topup_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T4_ENDING_FREE:{name:'tfour_ending_free_nocl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
@@ -74,13 +72,25 @@ export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];c
 // Test stage for CSM templates: while a template has testers here it goes only to them (once each,
 // with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.
 // Their taps are logged against TEST_CUSTOMER (Madhav's test merchant) in the CSM Req Call Back pane.
+// Candidate replacements, sent only to WA_CANDIDATE_TESTERS (as test messages, logged against
+// TEST_CUSTOMER in each workspace); live sends keep using WA_TEMPLATES until they are swapped in.
+export const WA_CANDIDATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string;language?:string}>>={
+  SELLER_NOT_CONNECTED:{name:'salescrm_notconnected',body:['merchant_name'],callbackButton:'0'},
+  ONB_NOT_CONNECTED:{name:'onboardingcrm_notconnected',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
+  T1_RENEW:{name:'tone_renew_wcl',body:['merchant_name','impressions'],callbackButton:'1'},
+  T2_ENDED_FREE:{name:'ttwo_ended_free_wcl',body:['merchant_name','impressions','credits'],callbackButton:'1'},
+  T3_ENDED_TOPUP:{name:'tthree_ended_topup_wcl',body:['merchant_name','impressions','credits'],callbackButton:'1'},
+  T4_ENDING_FREE:{name:'tfour_ending_free_wcl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
+  T5_ENDING_TOPUP:{name:'tfive_ending_topup_wcl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
+};
+const CANDIDATE_WORKSPACE:Partial<Record<WaTemplate,WaWorkspace>>={SELLER_NOT_CONNECTED:'seller',ONB_NOT_CONNECTED:'onboarding'};
 // Testers used so far (Madhav, Nausheen, Aman): set e.g. {T2_ENDED_FREE:WA_TESTERS} to test a new template.
 export const WA_TESTERS=[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}];
-export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={
-  T1_RENEW_NEXT:WA_TESTERS.filter(t=>t.name!=='Aman'),
-};
+export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={};
 const TEST_CUSTOMER='518726118';
-const TEST_VARIABLES:Record<string,string>={impressions:'12,450',credits:'₹2,500',ad_end_date:fmtDate(new Date(Date.now()+86400000).toISOString())};
+const TEST_VARIABLES:Record<string,string>={impressions:'12,450',credits:'₹2,500',ad_end_date:fmtDate(new Date(Date.now()+86400000).toISOString()),
+  plan_name:'Gold',purchase_date:fmtDate(new Date().toISOString()),expiry_date:fmtDate(new Date(Date.now()+30*86400000).toISOString())};
+const WA_CANDIDATE_TESTERS=()=>WA_TESTERS.filter(t=>t.name!=='Aman');
 const csmLive=(t:WaTemplate)=>waReady(t)&&!CSM_WA_TESTERS[t];
 export const waReady=(t:WaTemplate)=>{const x=WA_TEMPLATES[t];return Boolean(process.env.PI_WA_API_KEY&&x&&(x.headerImage===undefined||x.headerImage));};
 // Test mode: when PI_WA_TEST_CUSTOMERS is set (comma-separated customer IDs), only those merchants
@@ -100,20 +110,29 @@ export async function sendQueuedWa(sql:any,ids:number[]){
   const rows=await sql`SELECT id,template,customer_id,phone,variables FROM wa_messages WHERE id=ANY(${ids}) AND status='queued'`;
   const test=testCustomers();
   for(const m of rows){
-    const t=WA_TEMPLATES[m.template as WaTemplate];
+    const t=(m.variables?.candidate&&WA_CANDIDATES[m.template as WaTemplate])||WA_TEMPLATES[m.template as WaTemplate];
     if(!t||!process.env.PI_WA_API_KEY){await sql`UPDATE wa_messages SET status_note='Waiting for platform template' WHERE id=${m.id}`;continue;}
     if(test.length&&!test.includes(String(m.customer_id))){await sql`UPDATE wa_messages SET status='skipped',status_note='Test mode: not a test merchant' WHERE id=${m.id}`;continue;}
     const to=waPhone(m.phone);
     if(!to){await sql`UPDATE wa_messages SET status='skipped',status_note='No phone number' WHERE id=${m.id}`;continue;}
     const v=m.variables||{};
-    const body=Object.fromEntries(t.body.map((k,i)=>[String(i+1),String(v[k]??'')]));
+    const body=Object.fromEntries(t.body.map((k:string,i:number)=>[String(i+1),String(v[k]??'')]));
     const media=String(v.header_media_url||t.headerImage||'');
     if(t.headerImage!==undefined&&!media){await sql`UPDATE wa_messages SET status_note='Waiting for header image link' WHERE id=${m.id}`;continue;}
     const payload={template_name:t.name,language:{code:t.language||'en_US',policy:'deterministic'},from:WA_FROM,default_country:'IN',
       recipients:[{to,variables:{...(media?{header:{media_url:media}}:{}),body,...(t.callbackButton!==undefined?{buttons:{[t.callbackButton]:{'1':String(v.callback_token||'')}}}:{})}}]};
     try{
-      const res=await fetch(WA_API_URL,{method:'POST',headers:{'X-API-Key':process.env.PI_WA_API_KEY!,'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      const text=(await res.text()).slice(0,500);
+      const post=(p:any)=>fetch(WA_API_URL,{method:'POST',headers:{'X-API-Key':process.env.PI_WA_API_KEY!,'Content-Type':'application/json'},body:JSON.stringify(p)});
+      let res=await post(payload);
+      let text=(await res.text()).slice(0,500);
+      // The curl only shows buttons that take a value, so the callback button's position can be off
+      // (a fixed "Renew" link before it). If the platform asks for another button's value, put the
+      // token there and send once more.
+      const want=/MISSING_VARIABLE[^]*?BUTTON\.(\d+)\.1/.exec(text)?.[1];
+      if(!res.ok&&t.callbackButton!==undefined&&want!==undefined&&want!==t.callbackButton){
+        const retry={...payload,recipients:[{...payload.recipients[0],variables:{...payload.recipients[0].variables,buttons:{[want]:{'1':String(v.callback_token||'')}}}}]};
+        res=await post(retry); text=(await res.text()).slice(0,500);
+      }
       if(res.ok) await sql`UPDATE wa_messages SET status='sent',sent_at=now(),phone=${to},attempts=attempts+1,status_note=${text} WHERE id=${m.id}`;
       else await sql`UPDATE wa_messages SET status='failed',attempts=attempts+1,status_note=${`HTTP ${res.status}: ${text}`} WHERE id=${m.id}`;
     }catch(e:any){
@@ -227,8 +246,11 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     const base={workspace:'csm' as const,customerId:String(r.customer_id),phone:r.phone};
     if(r.status==='CANCELLED'||r.status==='EXPIRED'){
       if(!ready.T1) continue;
-      // Once per lapse and platform template: a new T1 template also goes to merchants who got an earlier one.
       const cycle=String(r.due||r.cancelled_at||r.status);
+      // Once per lapse whichever T1 template version sent it (switching the platform template doesn't resend).
+      const had=await sql`SELECT 1 FROM wa_messages WHERE template='T1_RENEW' AND customer_id=${String(r.customer_id)} AND status IN ('sent','skipped')
+        AND (dedupe_key=${`T1_RENEW|${r.customer_id}|${cycle}`} OR dedupe_key LIKE ${`T1_RENEW|%|${r.customer_id}|${cycle}`}) LIMIT 1`;
+      if(had[0]) continue;
       const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${WA_TEMPLATES.T1_RENEW?.name}|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
         variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)}});
       if(id) ids.push(id);
@@ -283,6 +305,14 @@ async function sendCsmTests(sql:any){
     for(const x of testers||[]){
       const id=await queueWa(sql,{template:t,workspace:'csm',customerId:TEST_CUSTOMER,phone:x.phone,sourceRef:`test:${x.name}`,
         dedupeKey:`TEST|${t}|${WA_TEMPLATES[t]!.name}|${x.phone}`,variables:{...TEST_VARIABLES,merchant_name:x.name}});
+      if(id) ids.push(id);
+    }
+  }
+  // Candidate templates: each tester gets each candidate once.
+  if(process.env.PI_WA_API_KEY) for(const [t,c] of Object.entries(WA_CANDIDATES) as [WaTemplate,{name:string}][]){
+    for(const x of WA_CANDIDATE_TESTERS()){
+      const id=await queueWa(sql,{template:t,workspace:CANDIDATE_WORKSPACE[t]||'csm',customerId:TEST_CUSTOMER,phone:x.phone,sourceRef:`test:${x.name}`,
+        dedupeKey:`TEST|${t}|${c.name}|${x.phone}`,variables:{...TEST_VARIABLES,merchant_name:x.name,candidate:'1'}});
       if(id) ids.push(id);
     }
   }
