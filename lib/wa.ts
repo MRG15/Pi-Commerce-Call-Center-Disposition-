@@ -60,29 +60,21 @@ export async function queueWa(sql:any,m:QueueInput){
 const WA_API_URL=process.env.PI_WA_URL||'https://pi-commerce-bff.paytm.com/api/pi-commerce/v1/messages/whatsapp/send';
 const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string;language?:string}>>={
-  SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
-  ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
-  // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
-  T1_RENEW:{name:'tone_renew_test_nocl',body:['merchant_name','impressions'],callbackButton:'1'},
-  T2_ENDED_FREE:{name:'ttwo_ended_free_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
-  T3_ENDED_TOPUP:{name:'tthree_ended_topup_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
-  T4_ENDING_FREE:{name:'tfour_ending_free_nocl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
-  T5_ENDING_TOPUP:{name:'tfive_ending_topup_test',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
-};
-// Test stage for CSM templates: while a template has testers here it goes only to them (once each,
-// with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.
-// Their taps are logged against TEST_CUSTOMER (Madhav's test merchant) in the CSM Req Call Back pane.
-// Candidate replacements, sent only to WA_CANDIDATE_TESTERS (as test messages, logged against
-// TEST_CUSTOMER in each workspace); live sends keep using WA_TEMPLATES until they are swapped in.
-export const WA_CANDIDATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string;language?:string}>>={
   SELLER_NOT_CONNECTED:{name:'salescrm_notconnected',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboardingcrm_notconnected',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
+  // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
   T1_RENEW:{name:'tone_renew_wcl',body:['merchant_name','impressions'],callbackButton:'1'},
   T2_ENDED_FREE:{name:'ttwo_ended_free_wcl',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T3_ENDED_TOPUP:{name:'tthree_ended_topup_wcl',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T4_ENDING_FREE:{name:'tfour_ending_free_wcl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
   T5_ENDING_TOPUP:{name:'tfive_ending_topup_wcl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
 };
+// Test stage for CSM templates: while a template has testers here it goes only to them (once each,
+// with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.
+// Their taps are logged against TEST_CUSTOMER (Madhav's test merchant) in the CSM Req Call Back pane.
+// Candidate replacements, sent only to WA_CANDIDATE_TESTERS (as test messages, logged against
+// TEST_CUSTOMER in each workspace); live sends keep using WA_TEMPLATES until they are swapped in.
+export const WA_CANDIDATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string;language?:string}>>={};
 const CANDIDATE_WORKSPACE:Partial<Record<WaTemplate,WaWorkspace>>={SELLER_NOT_CONNECTED:'seller',ONB_NOT_CONNECTED:'onboarding'};
 // Testers used so far (Madhav, Nausheen, Aman): set e.g. {T2_ENDED_FREE:WA_TESTERS} to test a new template.
 export const WA_TESTERS=[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}];
