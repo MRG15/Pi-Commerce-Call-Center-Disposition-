@@ -5,7 +5,7 @@ import { randomBytes } from 'crypto';
 import { currentPlanOf } from './plan-upgrade';
 import { planLabel } from './plans';
 
-export type WaTemplate='SELLER_NOT_CONNECTED'|'ONB_NOT_CONNECTED'|'T1_RENEW'|'T2_ENDED_FREE'|'T3_ENDED_TOPUP'|'T4_ENDING_FREE'|'T5_ENDING_TOPUP';
+export type WaTemplate='SELLER_NOT_CONNECTED'|'ONB_NOT_CONNECTED'|'T1_RENEW'|'T2_ENDED_FREE'|'T3_ENDED_TOPUP'|'T4_ENDING_FREE'|'T5_ENDING_TOPUP'|'T1_RENEW_NEXT';
 export type WaWorkspace='seller'|'onboarding'|'csm';
 export const SELLER_WA_L0=['l0_voicemail','l0_disconnected','l0_not_connected'];
 // Credits a plan starts with, for onboarding messages sent before Sub Raw has the merchant.
@@ -28,13 +28,13 @@ export async function merchantContact(sql:any,customerId:string){
   return {name:rows[0]?.name||'',phone:rows[0]?.phone||''};
 }
 
-// Not Interested / Refund: onboarding case Lost, or the latest CSM call is NI / Refund.
+// Not Interested / Refund: onboarding case Lost, or a CSM has ever marked the merchant Not Interested /
+// Refund Requested (whatever was logged after it). These merchants get no WhatsApp at all.
 export async function waSuppressed(sql:any,customerId:string){
   const rows=await sql`
     SELECT EXISTS(SELECT 1 FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='lost')
-        OR COALESCE((SELECT l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') FROM onboarding_events
-                     WHERE customer_id=${customerId} AND source_type='customer_success_followup'
-                     ORDER BY event_time DESC,attempt_number DESC LIMIT 1),FALSE) AS suppressed
+        OR EXISTS(SELECT 1 FROM onboarding_events WHERE customer_id=${customerId} AND source_type='customer_success_followup'
+                  AND l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED')) AS suppressed
   `;
   return Boolean(rows[0]?.suppressed);
 }
@@ -59,11 +59,13 @@ export async function queueWa(sql:any,m:QueueInput){
 // button, if it has one. A template without an entry here is not sent (its messages stay queued).
 const WA_API_URL=process.env.PI_WA_URL||'https://pi-commerce-bff.paytm.com/api/pi-commerce/v1/messages/whatsapp/send';
 const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
-export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string}>>={
+export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string;language?:string}>>={
   SELLER_NOT_CONNECTED:{name:'sellerworkspace_not_connected_fv',body:['merchant_name'],callbackButton:'0'},
   ONB_NOT_CONNECTED:{name:'onboarding_not_connected_fv',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
   // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
   T1_RENEW:{name:'tone_renew_test_nocl',body:['merchant_name','impressions'],callbackButton:'1'},
+  // Candidate replacement for T1 (language "en"), sent to testers only; no rule uses it.
+  T1_RENEW_NEXT:{name:'renewww',body:['merchant_name','impressions'],callbackButton:'1',language:'en'},
   T2_ENDED_FREE:{name:'ttwo_ended_free_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T3_ENDED_TOPUP:{name:'tthree_ended_topup_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T4_ENDING_FREE:{name:'tfour_ending_free_nocl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
@@ -74,7 +76,9 @@ export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];c
 // Their taps are logged against TEST_CUSTOMER (Madhav's test merchant) in the CSM Req Call Back pane.
 // Testers used so far (Madhav, Nausheen, Aman): set e.g. {T2_ENDED_FREE:WA_TESTERS} to test a new template.
 export const WA_TESTERS=[{name:'Madhav',phone:'+918383059253'},{name:'Nausheen',phone:'+918686024333'},{name:'Aman',phone:'+919910468198'}];
-export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={};
+export const CSM_WA_TESTERS:Partial<Record<WaTemplate,{name:string;phone:string}[]>>={
+  T1_RENEW_NEXT:WA_TESTERS.filter(t=>t.name!=='Aman'),
+};
 const TEST_CUSTOMER='518726118';
 const TEST_VARIABLES:Record<string,string>={impressions:'12,450',credits:'₹2,500',ad_end_date:fmtDate(new Date(Date.now()+86400000).toISOString())};
 const csmLive=(t:WaTemplate)=>waReady(t)&&!CSM_WA_TESTERS[t];
@@ -105,7 +109,7 @@ export async function sendQueuedWa(sql:any,ids:number[]){
     const body=Object.fromEntries(t.body.map((k,i)=>[String(i+1),String(v[k]??'')]));
     const media=String(v.header_media_url||t.headerImage||'');
     if(t.headerImage!==undefined&&!media){await sql`UPDATE wa_messages SET status_note='Waiting for header image link' WHERE id=${m.id}`;continue;}
-    const payload={template_name:t.name,language:{code:'en_US',policy:'deterministic'},from:WA_FROM,default_country:'IN',
+    const payload={template_name:t.name,language:{code:t.language||'en_US',policy:'deterministic'},from:WA_FROM,default_country:'IN',
       recipients:[{to,variables:{...(media?{header:{media_url:media}}:{}),body,...(t.callbackButton!==undefined?{buttons:{[t.callbackButton]:{'1':String(v.callback_token||'')}}}:{})}}]};
     try{
       const res=await fetch(WA_API_URL,{method:'POST',headers:{'X-API-Key':process.env.PI_WA_API_KEY!,'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -204,8 +208,8 @@ export async function runCsmWaTriggers(sql:any,runId:number){
         COALESCE(NULLIF(s.merchant_name,''),a.name) AS name,COALESCE(NULLIF(s.phone_number,''),a.phone) AS phone,
         a.impressions,a.last_end::text AS last_end,a.active_ads,
         (c.current_status='lost') AS onb_lost,
-        COALESCE((SELECT e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') FROM onboarding_events e
-          WHERE e.customer_id=s.customer_id AND e.source_type='customer_success_followup' ORDER BY e.event_time DESC,e.attempt_number DESC LIMIT 1),FALSE) AS closed,
+        EXISTS(SELECT 1 FROM onboarding_events e WHERE e.customer_id=s.customer_id AND e.source_type='customer_success_followup'
+          AND e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED')) AS closed,
         (c.current_status='open' AND c.reopen_reason IS NOT NULL) AS reopened
       FROM merchant_subscriptions s
       LEFT JOIN (SELECT customer_id,sum(impressions)::float8 AS impressions,max(end_date) AS last_end,count(*) FILTER (WHERE ad_status='ACTIVE')::int AS active_ads,
