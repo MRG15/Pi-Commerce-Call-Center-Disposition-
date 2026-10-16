@@ -28,14 +28,13 @@ export async function merchantContact(sql:any,customerId:string){
   return {name:rows[0]?.name||'',phone:rows[0]?.phone||''};
 }
 
-// Not Interested / Refund: onboarding case Lost, or the latest CSM call that connected is NI / Refund
-// (a later Not Connected call doesn't lift it; a later conversation with another outcome does).
+// Not Interested / Refund: onboarding case Lost, or a CSM has ever marked the merchant Not Interested /
+// Refund Requested (whatever was logged after it). These merchants get no WhatsApp at all.
 export async function waSuppressed(sql:any,customerId:string){
   const rows=await sql`
     SELECT EXISTS(SELECT 1 FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='lost')
-        OR COALESCE((SELECT l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') FROM onboarding_events
-                     WHERE customer_id=${customerId} AND source_type='customer_success_followup' AND l0_code<>'OB_NOT_CONNECTED'
-                     ORDER BY event_time DESC,attempt_number DESC LIMIT 1),FALSE) AS suppressed
+        OR EXISTS(SELECT 1 FROM onboarding_events WHERE customer_id=${customerId} AND source_type='customer_success_followup'
+                  AND l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED')) AS suppressed
   `;
   return Boolean(rows[0]?.suppressed);
 }
@@ -205,9 +204,8 @@ export async function runCsmWaTriggers(sql:any,runId:number){
         COALESCE(NULLIF(s.merchant_name,''),a.name) AS name,COALESCE(NULLIF(s.phone_number,''),a.phone) AS phone,
         a.impressions,a.last_end::text AS last_end,a.active_ads,
         (c.current_status='lost') AS onb_lost,
-        COALESCE((SELECT e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') FROM onboarding_events e
-          WHERE e.customer_id=s.customer_id AND e.source_type='customer_success_followup' AND e.l0_code<>'OB_NOT_CONNECTED'
-          ORDER BY e.event_time DESC,e.attempt_number DESC LIMIT 1),FALSE) AS closed,
+        EXISTS(SELECT 1 FROM onboarding_events e WHERE e.customer_id=s.customer_id AND e.source_type='customer_success_followup'
+          AND e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED')) AS closed,
         (c.current_status='open' AND c.reopen_reason IS NOT NULL) AS reopened
       FROM merchant_subscriptions s
       LEFT JOIN (SELECT customer_id,sum(impressions)::float8 AS impressions,max(end_date) AS last_end,count(*) FILTER (WHERE ad_status='ACTIVE')::int AS active_ads,
