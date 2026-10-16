@@ -61,3 +61,17 @@ export async function applyDueTeamChanges(sql:any,force=false){
     });
   }
 }
+
+// Access given in Manage Access puts the person on that workspace's team from today (Incentive
+// off; switch it on in Teams). Only for agent-level access: admins and customer-success reps are
+// not team members. Does nothing if they are already on the team.
+export async function joinTeamForAccess(sql:any,agentId:string,workspace:'seller'|'onboarding'|'csm',level:string|null,byId:string|null){
+  if(level!=='agent') return;
+  const team=(Object.keys(TEAM_WORKSPACE) as Team[]).find(t=>TEAM_WORKSPACE[t]===workspace);
+  if(!team) return;
+  const cur=(await sql`SELECT member FROM team_changes WHERE agent_id=${agentId}::uuid AND team=${team} AND effective_from<=${todayIst()}::date
+    ORDER BY effective_from DESC,id DESC LIMIT 1`)[0];
+  if(cur?.member) return;
+  await sql`INSERT INTO team_changes(agent_id,team,effective_from,member,incentive,applied_at,created_by)
+    VALUES(${agentId}::uuid,${team},${todayIst()}::date,TRUE,FALSE,now(),${byId}::uuid)`;
+}
