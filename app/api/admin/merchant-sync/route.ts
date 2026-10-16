@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { linkLeadsToCustomers } from '@/lib/leadgen';
+import { linkAfterMerchantSync } from '@/lib/leadgen';
 
 type MerchantRow = {
   customer_id?: unknown;
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
     });
 
     // New merchant phones: give Lead Gen leads still without a Cust ID theirs.
-    const leadsLinked = await linkLeadsToCustomers(sql).catch(() => 0);
+    const leadsLinked = await linkAfterMerchantSync(sql).catch((e) => { console.error('lead linking after merchant sync failed', e); return 0; });
     return NextResponse.json({ ok: true, received: rows.length, activeMerchants: result, syncedAt: startedAt, leadsLinked });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Merchant sync failed' }, { status: 500 });

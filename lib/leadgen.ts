@@ -57,7 +57,8 @@ export async function ingestLeads(sql:any,rows:SheetLead[]){
 // Gives unlinked leads the Cust ID of the merchant with that phone, and moves their lead-only
 // dispositions onto the Cust ID (attempt numbers continue after the merchant's own calls).
 // Merchant phones only change with the daily merchant sync, so the 5-minute lead sync checks just
-// the leads it brought in (onlyIds) and the merchant sync re-checks every unlinked lead.
+// the leads it brought in (onlyIds) and every unlinked lead is re-checked once after each merchant
+// sync (linkAfterMerchantSync).
 export async function linkLeadsToCustomers(sql:any,onlyIds?:string[]){
   if(onlyIds&&!onlyIds.length) return 0;
   const matches=await sql`
@@ -67,7 +68,7 @@ export async function linkLeadsToCustomers(sql:any,onlyIds?:string[]){
       WHERE active=TRUE AND right(regexp_replace(COALESCE(phone_number,''),'[^0-9]','','g'),10)=l.phone
       ORDER BY last_synced_at DESC NULLS LAST,customer_id LIMIT 1
     ) m ON TRUE
-    WHERE l.customer_id IS NULL AND (${onlyIds?1:0}=0 OR l.id=ANY(${onlyIds||[]}::uuid[]))
+    WHERE l.customer_id IS NULL ${onlyIds?sql`AND l.id=ANY(${onlyIds}::uuid[])`:sql``}
   `;
   for(const x of matches){
     await sql.begin(async(tx:any)=>{
@@ -84,6 +85,17 @@ export async function linkLeadsToCustomers(sql:any,onlyIds?:string[]){
     });
   }
   return matches.length;
+}
+
+// Once per merchant sync: re-checks every unlinked lead against the new merchant phones. Called
+// by the merchant sync itself and, as a safety net, by the 5-minute lead sync until it has run.
+export async function linkAfterMerchantSync(sql:any){
+  const run=(await sql`SELECT id FROM merchant_sync_runs WHERE status='success' AND leads_linked_at IS NULL
+    AND started_at=(SELECT max(started_at) FROM merchant_sync_runs WHERE status='success')`)[0];
+  if(!run) return 0;
+  const n=await linkLeadsToCustomers(sql);
+  await sql`UPDATE merchant_sync_runs SET leads_linked_at=now() WHERE id=${run.id}`;
+  return n;
 }
 
 export async function loadLeadgenRoster(sql:any){
