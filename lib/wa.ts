@@ -65,7 +65,7 @@ export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];c
   // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
   T1_RENEW:{name:'tone_renew_test_nocl',body:['merchant_name','impressions'],callbackButton:'1'},
   // Candidate replacement for T1 (language "en"), sent to testers only; no rule uses it.
-  T1_RENEW_NEXT:{name:'renewww',body:['merchant_name','impressions'],callbackButton:'0',language:'en'},
+  T1_RENEW_NEXT:{name:'renewww',body:['merchant_name','impressions'],callbackButton:'1',language:'en'},
   T2_ENDED_FREE:{name:'ttwo_ended_free_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T3_ENDED_TOPUP:{name:'tthree_ended_topup_test',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T4_ENDING_FREE:{name:'tfour_ending_free_nocl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
