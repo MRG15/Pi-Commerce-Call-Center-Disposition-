@@ -242,20 +242,36 @@ export async function runCsmWaTriggers(sql:any,runId:number){
       // Once per lapse whichever T1 template version sent it (switching the platform template doesn't resend).
       const had=await sql`SELECT 1 FROM wa_messages WHERE template='T1_RENEW' AND customer_id=${String(r.customer_id)} AND status IN ('sent','skipped')
         AND (dedupe_key=${`T1_RENEW|${r.customer_id}|${cycle}`} OR dedupe_key LIKE ${`T1_RENEW|%|${r.customer_id}|${cycle}`}) LIMIT 1`;
-      if(had[0]) continue;
+      const t1vars={merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)};
+      if(had[0]){
+        // Still lapsed: reminders on T+1, T+3, T+5 after the first message.
+        const id=await queueFollowUp(sql,{...base,template:'T1_RENEW',runId,today,variables:t1vars,followKey:`T1_RENEW|FU|${r.customer_id}|${cycle}`,
+          firstSent:sql`SELECT min(sent_at) AS at FROM wa_messages WHERE template='T1_RENEW' AND customer_id=${String(r.customer_id)} AND status='sent'
+            AND COALESCE(source_ref,'') NOT LIKE 'test:%' AND (dedupe_key=${`T1_RENEW|${r.customer_id}|${cycle}`} OR dedupe_key LIKE ${`T1_RENEW|%|${r.customer_id}|${cycle}`})
+            AND dedupe_key NOT LIKE 'T1_RENEW|FU|%'`});
+        if(id) ids.push(id);
+        continue;
+      }
       const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${WA_TEMPLATES.T1_RENEW?.name}|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
-        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)}});
+        variables:t1vars});
       if(id) ids.push(id);
       continue;
     }
     if(!r.last_end) continue;
     const free=Number(r.credits||0)>=1000;
-    if(r.last_end<=today&&(dayOne||r.last_end>=addDays(today,-1))){
+    if(r.last_end<=today){
       if(!ready.ENDED) continue;
       const t=free?'T2_ENDED_FREE':'T3_ENDED_TOPUP';
-      const id=await queueWa(sql,{...base,template:t,dedupeKey:`ENDED|${r.customer_id}|${r.last_end}`,sourceRef:`run:${runId}`,
-        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)}});
-      if(id) ids.push(id);
+      const key=`ENDED|${r.customer_id}|${r.last_end}`;
+      const vars={merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)};
+      if(dayOne||r.last_end>=addDays(today,-1)){
+        const id=await queueWa(sql,{...base,template:t,dedupeKey:key,sourceRef:`run:${runId}`,variables:vars});
+        if(id) ids.push(id);
+      }
+      // Still in the ads-ended bucket (no newer ad): reminders on T+1, T+3, T+5 after the first message.
+      const fu=await queueFollowUp(sql,{...base,template:t,runId,today,variables:vars,followKey:key,
+        firstSent:sql`SELECT min(sent_at) AS at FROM wa_messages WHERE dedupe_key=${key} AND status='sent'`});
+      if(fu) ids.push(fu);
     }else if(r.last_end===addDays(today,1)&&r.active_ads>0){
       if(!ready.ENDING) continue;
       const t=free?'T4_ENDING_FREE':'T5_ENDING_TOPUP';
@@ -287,6 +303,24 @@ export async function ensureCsmWaRun(sql:any){
 export async function resolveCallbackRequests(sql:any,workspace:WaWorkspace,customerId:string|null,leadId?:string|null){
   if(customerId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND customer_id=${customerId} AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
   if(leadId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND lead_id=${leadId}::uuid AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
+}
+
+// CSM reminders: after a merchant's first message for a bucket (the day they enter it), the same
+// message goes again on T+1, T+3 and T+5 while they are still in that bucket (T4/T5 "ending tomorrow"
+// lasts one day, so it never gets reminders). Each reminder is sent at most once; if a day's sync is
+// missed, a reminder can still go the next day (T+1 on day 1–2, T+3 on 3–4, T+5 on 5–6). Only for
+// first messages sent on or after CSM_REMINDERS_FROM, so older merchants don't get a burst.
+export const CSM_REMINDERS_FROM='2026-10-19';
+async function queueFollowUp(sql:any,o:{workspace:'csm';customerId:string;phone:any;template:WaTemplate;runId:number;today:string;variables:Record<string,string>;followKey:string;firstSent:any}){
+  const first=(await o.firstSent)[0]?.at;
+  if(!first) return null;
+  const firstDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date(first));
+  if(firstDay<CSM_REMINDERS_FROM) return null;
+  const days=Math.round((new Date(o.today+'T00:00:00Z').getTime()-new Date(firstDay+'T00:00:00Z').getTime())/86400000);
+  const slot=days===1||days===2?1:days===3||days===4?3:days===5||days===6?5:0;
+  if(!slot) return null;
+  return queueWa(sql,{workspace:o.workspace,customerId:o.customerId,phone:o.phone,template:o.template,sourceRef:`run:${o.runId}`,
+    dedupeKey:`${o.followKey}|T+${slot}`,variables:o.variables});
 }
 
 // Sends each CSM template in its test stage to its testers, once per tester and platform template.
