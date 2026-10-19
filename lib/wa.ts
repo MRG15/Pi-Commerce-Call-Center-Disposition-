@@ -287,8 +287,15 @@ export async function runCsmWaTriggers(sql:any,runId:number){
 // Runs the live CSM templates on the latest snapshot unless that snapshot was already processed with
 // the same set of live templates. Adding a template later processes it again; the once-per-cycle
 // keys stop anyone getting the same message twice.
+// CSM messages (first messages and T+1/T+3/T+5 reminders) go out from 12 PM IST: the morning sync's
+// snapshot is processed by the first trigger after noon (the 5-minute lead sync, or the CSM workspace).
+export const CSM_SEND_HOUR_IST=12;
 export async function ensureCsmWaRun(sql:any){
   await sendCsmTests(sql);
+  if(new Date(Date.now()+330*60000).getUTCHours()<CSM_SEND_HOUR_IST) return;
+  // CSM messages queued but never sent (e.g. a run cut off part-way) go out on the next trigger.
+  const stuck=await sql`SELECT id FROM wa_messages WHERE workspace='csm' AND status='queued' AND created_at<now()-interval '10 minutes' AND created_at>now()-interval '2 days'`;
+  if(stuck.length) await sendQueuedWa(sql,stuck.map((r:any)=>Number(r.id)));
   const live=(['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'] as WaTemplate[]).filter(csmLive).join(',');
   if(!CSM_AUTO_SEND||!live) return;
   const claim=await sql`
