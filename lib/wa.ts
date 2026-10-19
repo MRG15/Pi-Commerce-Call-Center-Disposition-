@@ -230,8 +230,6 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     )
     SELECT * FROM m WHERE NOT COALESCE(onb_lost,FALSE) AND NOT closed AND NOT COALESCE(reopened,FALSE)
   `;
-  // Day one for a template pair = the first run after it goes live.
-  const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template IN ('T2_ENDED_FREE','T3_ENDED_TOPUP') AND status<>'baseline' AND COALESCE(source_ref,'') NOT LIKE 'test:%'`)[0].n===0;
   const addDays=(d:string,n:number)=>new Date(new Date(d+'T00:00:00Z').getTime()+n*86400000).toISOString().slice(0,10);
   const ids:number[]=[];
   for(const r of rows){
@@ -264,10 +262,10 @@ export async function runCsmWaTriggers(sql:any,runId:number){
       const t=free?'T2_ENDED_FREE':'T3_ENDED_TOPUP';
       const key=`ENDED|${r.customer_id}|${r.last_end}`;
       const vars={merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)};
-      if(dayOne||r.last_end>=addDays(today,-1)){
-        const id=await queueWa(sql,{...base,template:t,dedupeKey:key,sourceRef:`run:${runId}`,variables:vars});
-        if(id) ids.push(id);
-      }
+      // First message whenever a merchant is in this bucket without one yet for these ads — whether
+      // their ads just ended or they moved here from another bucket (e.g. renewed with no ad running).
+      const id=await queueWa(sql,{...base,template:t,dedupeKey:key,sourceRef:`run:${runId}`,variables:vars});
+      if(id) ids.push(id);
       // Still in the ads-ended bucket (no newer ad): reminders on T+1, T+3, T+5 after the first message.
       const fu=await queueFollowUp(sql,{...base,template:t,runId,today,variables:vars,followKey:key,
         firstSent:sql`SELECT min(sent_at) AS at FROM wa_messages WHERE dedupe_key=${key} AND status='sent'`});
