@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { PLANS } from '@/lib/plans';
 import { currentUserAccess } from '@/lib/workspace-access';
 import { loadOnboardingRoster,pickOnboarder,takeNextOnboarder } from '@/lib/onboarding';
 
@@ -123,6 +124,7 @@ export async function POST(req:Request){
         await tx`UPDATE ct_payment_events SET case_action='unmatched_mid' WHERE id=${ins[0].id}`;
         return;
       }
+      const planName=r.plan&&r.plan in PLANS?PLANS[r.plan as keyof typeof PLANS].label:null;
       const existing=await tx`SELECT id,sold_by_employee_code FROM onboarding_cases WHERE customer_id=${r.customerId} ORDER BY created_at LIMIT 1 FOR UPDATE`;
       let action='ignored';
       if(existing[0]){
@@ -130,6 +132,10 @@ export async function POST(req:Request){
         // Only the subscription sale sets who sold it; a later top-up never relabels the case.
         if(r.isSubscription&&r.employeeCode&&!existing[0].sold_by_employee_code)
           await tx`UPDATE onboarding_cases SET sold_by_employee_code=${r.employeeCode},updated_at=now() WHERE id=${existing[0].id}::uuid`;
+        // Plan in real time: a subscription fills it if the case has none yet; an upgrade sets the new plan.
+        if(planName&&(r.isSubscription||r.flow==='upgrade'))
+          await tx`UPDATE onboarding_cases SET sub_plan_name=${planName},updated_at=now()
+            WHERE id=${existing[0].id}::uuid AND (${r.flow==='upgrade'} OR sub_plan_name IS NULL)`;
       }else if(r.isSubscription){
         // Same equal rotation as every new onboarding case.
         const roster=await loadOnboardingRoster(tx);
@@ -138,8 +144,8 @@ export async function POST(req:Request){
           const saleDate=istDay(r.at);
           await tx`INSERT INTO customers(customer_id) VALUES(${r.customerId}) ON CONFLICT (customer_id) DO NOTHING`;
           const c=await tx`
-            INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at,sold_by_employee_code,created_by_ct,rotation_agent_id)
-            VALUES(${r.customerId},'historical_import',${saleDate}::date,${target.id}::uuid,now(),NULL,${r.employeeCode},TRUE,${target.id}::uuid)
+            INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at,sold_by_employee_code,created_by_ct,rotation_agent_id,sub_plan_name)
+            VALUES(${r.customerId},'historical_import',${saleDate}::date,${target.id}::uuid,now(),NULL,${r.employeeCode},TRUE,${target.id}::uuid,${planName})
             RETURNING id
           `;
           await tx`

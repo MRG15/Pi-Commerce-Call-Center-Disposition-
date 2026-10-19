@@ -37,7 +37,7 @@ export async function csmMerchants(sql:any,runId:number){
         max(merchant_name) AS ad_merchant_name,max(phone_number) AS ad_phone
       FROM merchant_ads WHERE sync_run_id=${runId} GROUP BY customer_id
     ), cases AS (
-      SELECT DISTINCT ON (customer_id) id,customer_id,current_status,assigned_to,ads_live_at,closed_at,current_l0,current_l1,current_l2,reopen_reason
+      SELECT DISTINCT ON (customer_id) id,customer_id,current_status,assigned_to,ads_live_at,closed_at,current_l0,current_l1,current_l2,reopen_reason,sub_plan_name
       FROM onboarding_cases ORDER BY customer_id,created_at
     ), base AS (
       SELECT s.customer_id,s.status AS sub_status,
@@ -47,7 +47,7 @@ export async function csmMerchants(sql:any,runId:number){
         s.cancelled_at::text AS cancelled_at,s.expected_renewal_due_date::text AS renewal_due,s.renewal_date::text AS renewal_date,
         s.completed_ads_count,s.wallet_balance::float8 AS credits,
         COALESCE(a.total_ads,0) AS total_ads,COALESCE(a.active_ads,0) AS active_ads,COALESCE(a.completed_ads,0) AS completed_ads,
-        c.id AS case_id,c.current_status AS case_status,owner.name AS onboarding_owner,
+        c.id AS case_id,c.current_status AS case_status,c.sub_plan_name AS plan_name,owner.name AS onboarding_owner,
         CASE WHEN c.current_status='lost' THEN concat_ws(' → ',c.current_l0,c.current_l1,c.current_l2) END AS lost_reason,
         CASE WHEN c.current_status='lost' THEN c.closed_at END AS lost_at,
         CASE WHEN c.current_status='lost' THEN 'onb_lost'

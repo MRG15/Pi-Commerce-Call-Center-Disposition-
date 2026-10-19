@@ -446,7 +446,7 @@ export async function POST(req:Request){
   if(!dryRun&&subFields.length){
     await sql`
       UPDATE onboarding_cases c SET sub_status=x.status,sub_cancelled_at=x.cancelled_at::date,sub_credits=x.credits,
-        last_completed_stage=x.stage,sub_plan_name=CASE WHEN x.plan_known THEN x.plan ELSE c.sub_plan_name END,
+        last_completed_stage=x.stage,sub_plan_name=CASE WHEN x.plan_known AND c.sub_plan_name IS NULL THEN x.plan ELSE c.sub_plan_name END,
         sub_plan_amount=CASE WHEN x.plan_known THEN x.amount ELSE c.sub_plan_amount END,
         sub_expiry_date=CASE WHEN x.expiry_known THEN x.expiry::date ELSE c.sub_expiry_date END,sub_synced_at=now()
       FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text,plan_known boolean,plan text,amount numeric,expiry_known boolean,expiry text)
