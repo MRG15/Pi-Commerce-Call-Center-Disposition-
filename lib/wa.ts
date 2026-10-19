@@ -313,10 +313,10 @@ export async function resolveCallbackRequests(sql:any,workspace:WaWorkspace,cust
 }
 
 // CSM reminders: after a merchant's first message for a bucket (the day they enter it), the same
-// message goes again on T+1, T+3 and T+5 while they are still in that bucket (T4/T5 "ending tomorrow"
-// lasts one day, so it never gets reminders). Each reminder is sent at most once; if a day's sync is
-// missed, a reminder can still go the next day (T+1 on day 1–2, T+3 on 3–4, T+5 on 5–6). Only for
-// first messages sent on or after CSM_REMINDERS_FROM, so older merchants don't get a burst.
+// message goes again every second day — T+1, T+3, T+5, T+7, … — for as long as they are still in that
+// bucket (T4/T5 "ending tomorrow" lasts one day, so it never gets reminders). Each reminder is sent at
+// most once; if a day's run is missed, it can still go the next day. Only for first messages sent on
+// or after CSM_REMINDERS_FROM, so older merchants don't get a burst.
 export const CSM_REMINDERS_FROM='2026-10-19';
 async function queueFollowUp(sql:any,o:{workspace:'csm';customerId:string;phone:any;template:WaTemplate;runId:number;today:string;variables:Record<string,string>;followKey:string;firstSent:any}){
   const first=(await o.firstSent)[0]?.at;
@@ -324,7 +324,8 @@ async function queueFollowUp(sql:any,o:{workspace:'csm';customerId:string;phone:
   const firstDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date(first));
   if(firstDay<CSM_REMINDERS_FROM) return null;
   const days=Math.round((new Date(o.today+'T00:00:00Z').getTime()-new Date(firstDay+'T00:00:00Z').getTime())/86400000);
-  const slot=days===1||days===2?1:days===3||days===4?3:days===5||days===6?5:0;
+  // Every second day: T+1, T+3, T+5, T+7, … (an even day sends the previous slot if a sync was missed).
+  const slot=days<1?0:days%2===1?days:days-1;
   if(!slot) return null;
   return queueWa(sql,{workspace:o.workspace,customerId:o.customerId,phone:o.phone,template:o.template,sourceRef:`run:${o.runId}`,
     dedupeKey:`${o.followKey}|T+${slot}`,variables:o.variables});
