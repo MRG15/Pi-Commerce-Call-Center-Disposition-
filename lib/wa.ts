@@ -196,17 +196,14 @@ export async function retryOnboardingNoPhone(sql:any){
   return ids.length;
 }
 
-// CSM, after each completed daily sync (latest snapshot `runId`), for merchants in the CSM panel:
-//   T1_RENEW         Expired / Cancelled, not renewed (once per lapse)
-//   T2/T3            ads ended (latest ad end date is today or yesterday), credits ≥ / < ₹1,000
+// CSM, once per daily snapshot from 12 PM IST, for merchants in the CSM panel (buckets):
+//   T1_RENEW         lapsed: Expired / Cancelled, not renewed
+//   T2/T3            ads ended (no ad running), credits ≥ / < ₹1,000
 //   T4/T5            ads end tomorrow, credits ≥ / < ₹1,000
-// Day one (the first sync once the CSM templates are set) messages everyone who qualifies, ads that
-// ended earlier included; after that only new entries. Once per merchant per template and cycle
-// (lapse date / ad end date). Merchants marked Not Interested / Refund (CSM closed or onboarding
-// lost) are left out. Nothing is recorded until the CSM templates are configured, so day one starts
-// when sending actually can.
-// CSM messages go out automatically for every template that is configured. Each snapshot is processed right after the daily sync, and again the first
-// time the CSM workspace is opened after a template goes live mid-day (see ensureCsmWaRun).
+// A merchant gets the bucket's message when they enter it (per lapse / ad end date), then the same
+// message every second day while they stay in it (see queueFollowUp). Moving to another bucket starts
+// that bucket's messages. Merchants ever marked Not Interested / Refund by a CSM, onboarding Lost or
+// reopened by the onboarding sync are left out.
 export const CSM_AUTO_SEND=true;
 export async function runCsmWaTriggers(sql:any,runId:number){
   if(!CSM_AUTO_SEND) return {queued:0,note:'CSM automatic sending is off'};
