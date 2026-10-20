@@ -61,7 +61,7 @@ const WA_API_URL=process.env.PI_WA_URL||'https://pi-commerce-bff.paytm.com/api/p
 const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string;language?:string}>>={
   SELLER_NOT_CONNECTED:{name:'salescrm_notconnected',body:['merchant_name'],callbackButton:'0'},
-  ONB_NOT_CONNECTED:{name:'onboardingcrm_notconnected',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
+  ONB_NOT_CONNECTED:{name:'onboardingcrm_notconnected_final',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
   // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
   T1_RENEW:{name:'tone_renew_wcl',body:['merchant_name','impressions'],callbackButton:'1'},
   T2_ENDED_FREE:{name:'ttwo_ended_free_wcl',body:['merchant_name','impressions','credits'],callbackButton:'1'},
