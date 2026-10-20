@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'crypto';
-import { NextResponse } from 'next/server';
+import { NextResponse,after } from 'next/server';
 import { db } from '@/lib/db';
-import { retryOnboardingNoPhone } from '@/lib/wa';
+import { retryOnboardingNoPhone,ensureCsmWaRun } from '@/lib/wa';
 import { runDailyJobs } from '@/lib/onboarding-rebalance';
 import { ingestLeads,linkLeadsToCustomers,linkAfterMerchantSync,assignUnassignedLeads } from '@/lib/leadgen';
 
@@ -14,7 +14,7 @@ function sameSecret(a:string,b:string){
   return aa.length===bb.length && timingSafeEqual(aa,bb);
 }
 
-export const maxDuration=60;
+export const maxDuration=300;
 
 export async function POST(req:Request){
   const configured=process.env.SUB_RAW_SYNC_SECRET||'';
@@ -33,5 +33,8 @@ export async function POST(req:Request){
   await retryOnboardingNoPhone(sql).catch((e:any)=>console.error('onboarding no-phone retry failed',e));
   // Also the clock for once-a-day jobs: the 8:30 AM onboarding backlog rebalance.
   await runDailyJobs(sql).catch((e:any)=>console.error('daily jobs failed',e));
+  // And for the CSM WhatsApps at 12 PM (once per day's snapshot), after the response so the
+  // sheet script isn't kept waiting while they send.
+  after(async()=>{await ensureCsmWaRun(sql).catch((e:any)=>console.error('csm whatsapp error',e));});
   return NextResponse.json({ok:true,received:rows.length,...ingest,linked,assigned});
 }

@@ -48,7 +48,7 @@ export default function CsmConsole(){
   const [user,setUser]=useState<any>(null),[data,setData]=useState<any>(null),[nodes,setNodes]=useState<Node[]>([]);
   const reqCb=useCallbackRequests('csm');
   const [view,setView]=useState<View>('queues'),[tab,setTab]=useState<Tab>('ending'),[search,setSearch]=useState(''),[csmFilter,setCsmFilter]=useState('');
-  const [cxSub,setCxSub]=useState<CxSub>(''),[sortBy,setSortBy]=useState<SortState<SortBy>>({...NO_SORT}),[callFilter,setCallFilter]=useState<CallFilter>('');
+  const [cxSub,setCxSub]=useState<CxSub>(''),[sortBy,setSortBy]=useState<SortState<SortBy>>({...NO_SORT}),[callFilter,setCallFilter]=useState<CallFilter>(''),[planFilter,setPlanFilter]=useState('');
   const [selected,setSelected]=useState<any>(null),[detailLoading,setDetailLoading]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true);
 
   async function loadMerchants(){
@@ -84,7 +84,8 @@ export default function CsmConsole(){
   const merchants:any[]=data?.merchants||[];
   // Onboarding Lost is shared context for every CSM, so the CSM filter never hides it.
   // The call-status filter applies before counting, so the tab counts match the filter.
-  const pool=useMemo(()=>merchants.filter(m=>(!csmFilter||m.queue==='onb_lost'||(csmFilter==='none'?!m.assigned_to:String(m.assigned_to)===csmFilter))&&(!callFilter||callStateOf(m)===callFilter)),[merchants,csmFilter,callFilter]);
+  const pool=useMemo(()=>merchants.filter(m=>(!csmFilter||m.queue==='onb_lost'||(csmFilter==='none'?!m.assigned_to:String(m.assigned_to)===csmFilter))&&(!callFilter||callStateOf(m)===callFilter)&&(!planFilter||(planFilter==='none'?!m.plan_name:m.plan_name===planFilter))),[merchants,csmFilter,callFilter,planFilter]);
+  const planOptions=useMemo(()=>Array.from(new Set(merchants.map((m:any)=>m.plan_name).filter(Boolean))).sort() as string[],[merchants]);
   const tabOf=(m:any):Tab=>m.closed?'closed':(m.queue==='cancelled'||m.queue==='lapsed')?'cx':m.queue;
   const counts=useMemo(()=>{const c:any={ending:0,ended:0,cx:0,closed:0,onb_lost:0,cancelled:0,lapsed:0,all:pool.length};for(const m of pool){c[tabOf(m)]++;if(!m.closed&&(m.queue==='cancelled'||m.queue==='lapsed'))c[m.queue]++;}return c;},[pool]);
   const shown=useMemo(()=>{
@@ -119,6 +120,7 @@ export default function CsmConsole(){
           {view==='queues'&&tab==='onb_lost'&&<div className="note">Merchants onboarding closed as Not Interested / Refund. Shown so you can see why they are not in your calling queues (usually Meta was never linked). Lowest priority; call only if you choose to.</div>}
           <div className="search-row padtop">
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search merchant, customer ID or phone"/>
+            {view==='queues'&&<select className="csm-filter" value={planFilter} onChange={e=>setPlanFilter(e.target.value)}><option value="">All plans</option>{planOptions.map(p=><option key={p} value={p}>{p}</option>)}<option value="none">Plan not known</option></select>}
             {view==='queues'&&<select className="csm-filter" value={callFilter} onChange={e=>setCallFilter(e.target.value as CallFilter)}><option value="">All call status</option><option value="never">Never called</option><option value="not_connected">Called, not connected</option><option value="connected">Connected</option></select>}
             {admin&&<select className="csm-filter" value={csmFilter} onChange={e=>setCsmFilter(e.target.value)}><option value="">All CSMs</option>{(data?.csms||[]).map((c:any)=><option key={c.id} value={c.id}>{c.name}</option>)}<option value="none">Unassigned</option></select>}
           </div>

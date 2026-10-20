@@ -61,7 +61,7 @@ const WA_API_URL=process.env.PI_WA_URL||'https://pi-commerce-bff.paytm.com/api/p
 const WA_FROM=process.env.PI_WA_FROM||'+918796553043';
 export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];callbackButton?:string;headerImage?:string;language?:string}>>={
   SELLER_NOT_CONNECTED:{name:'salescrm_notconnected',body:['merchant_name'],callbackButton:'0'},
-  ONB_NOT_CONNECTED:{name:'onboardingcrm_notconnected',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
+  ONB_NOT_CONNECTED:{name:'onboardingcrm_notconnected_final',body:['merchant_name','plan_name','purchase_date','expiry_date','credits'],callbackButton:'0'},
   // CSM templates: Renew / Top-up link first, Request Callback second (button 1).
   T1_RENEW:{name:'tone_renew_wcl',body:['merchant_name','impressions'],callbackButton:'1'},
   T2_ENDED_FREE:{name:'ttwo_ended_free_wcl',body:['merchant_name','impressions','credits'],callbackButton:'1'},
@@ -196,17 +196,14 @@ export async function retryOnboardingNoPhone(sql:any){
   return ids.length;
 }
 
-// CSM, after each completed daily sync (latest snapshot `runId`), for merchants in the CSM panel:
-//   T1_RENEW         Expired / Cancelled, not renewed (once per lapse)
-//   T2/T3            ads ended (latest ad end date is today or yesterday), credits ≥ / < ₹1,000
+// CSM, once per daily snapshot from 12 PM IST, for merchants in the CSM panel (buckets):
+//   T1_RENEW         lapsed: Expired / Cancelled, not renewed
+//   T2/T3            ads ended (no ad running), credits ≥ / < ₹1,000
 //   T4/T5            ads end tomorrow, credits ≥ / < ₹1,000
-// Day one (the first sync once the CSM templates are set) messages everyone who qualifies, ads that
-// ended earlier included; after that only new entries. Once per merchant per template and cycle
-// (lapse date / ad end date). Merchants marked Not Interested / Refund (CSM closed or onboarding
-// lost) are left out. Nothing is recorded until the CSM templates are configured, so day one starts
-// when sending actually can.
-// CSM messages go out automatically for every template that is configured. Each snapshot is processed right after the daily sync, and again the first
-// time the CSM workspace is opened after a template goes live mid-day (see ensureCsmWaRun).
+// A merchant gets the bucket's message when they enter it (per lapse / ad end date), then the same
+// message every second day while they stay in it (see queueFollowUp). Moving to another bucket starts
+// that bucket's messages. Merchants ever marked Not Interested / Refund by a CSM, onboarding Lost or
+// reopened by the onboarding sync are left out.
 export const CSM_AUTO_SEND=true;
 export async function runCsmWaTriggers(sql:any,runId:number){
   if(!CSM_AUTO_SEND) return {queued:0,note:'CSM automatic sending is off'};
@@ -230,8 +227,6 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     )
     SELECT * FROM m WHERE NOT COALESCE(onb_lost,FALSE) AND NOT closed AND NOT COALESCE(reopened,FALSE)
   `;
-  // Day one for a template pair = the first run after it goes live.
-  const dayOne=(await sql`SELECT count(*)::int AS n FROM wa_messages WHERE template IN ('T2_ENDED_FREE','T3_ENDED_TOPUP') AND status<>'baseline' AND COALESCE(source_ref,'') NOT LIKE 'test:%'`)[0].n===0;
   const addDays=(d:string,n:number)=>new Date(new Date(d+'T00:00:00Z').getTime()+n*86400000).toISOString().slice(0,10);
   const ids:number[]=[];
   for(const r of rows){
@@ -242,20 +237,36 @@ export async function runCsmWaTriggers(sql:any,runId:number){
       // Once per lapse whichever T1 template version sent it (switching the platform template doesn't resend).
       const had=await sql`SELECT 1 FROM wa_messages WHERE template='T1_RENEW' AND customer_id=${String(r.customer_id)} AND status IN ('sent','skipped')
         AND (dedupe_key=${`T1_RENEW|${r.customer_id}|${cycle}`} OR dedupe_key LIKE ${`T1_RENEW|%|${r.customer_id}|${cycle}`}) LIMIT 1`;
-      if(had[0]) continue;
+      const t1vars={merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)};
+      if(had[0]){
+        // Still lapsed: reminders on T+1, T+3, T+5 after the first message.
+        const id=await queueFollowUp(sql,{...base,template:'T1_RENEW',runId,today,variables:t1vars,followKey:`T1_RENEW|FU|${r.customer_id}|${cycle}`,
+          firstSent:sql`SELECT min(sent_at) AS at FROM wa_messages WHERE template='T1_RENEW' AND customer_id=${String(r.customer_id)} AND status='sent'
+            AND COALESCE(source_ref,'') NOT LIKE 'test:%' AND (dedupe_key=${`T1_RENEW|${r.customer_id}|${cycle}`} OR dedupe_key LIKE ${`T1_RENEW|%|${r.customer_id}|${cycle}`})
+            AND dedupe_key NOT LIKE 'T1_RENEW|FU|%'`});
+        if(id) ids.push(id);
+        continue;
+      }
       const id=await queueWa(sql,{...base,template:'T1_RENEW',dedupeKey:`T1_RENEW|${WA_TEMPLATES.T1_RENEW?.name}|${r.customer_id}|${cycle}`,sourceRef:`run:${runId}`,
-        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)}});
+        variables:t1vars});
       if(id) ids.push(id);
       continue;
     }
     if(!r.last_end) continue;
     const free=Number(r.credits||0)>=1000;
-    if(r.last_end<=today&&(dayOne||r.last_end>=addDays(today,-1))){
+    if(r.last_end<=today){
       if(!ready.ENDED) continue;
       const t=free?'T2_ENDED_FREE':'T3_ENDED_TOPUP';
-      const id=await queueWa(sql,{...base,template:t,dedupeKey:`ENDED|${r.customer_id}|${r.last_end}`,sourceRef:`run:${runId}`,
-        variables:{merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)}});
+      const key=`ENDED|${r.customer_id}|${r.last_end}`;
+      const vars={merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)};
+      // First message whenever a merchant is in this bucket without one yet for these ads — whether
+      // their ads just ended or they moved here from another bucket (e.g. renewed with no ad running).
+      const id=await queueWa(sql,{...base,template:t,dedupeKey:key,sourceRef:`run:${runId}`,variables:vars});
       if(id) ids.push(id);
+      // Still in the ads-ended bucket (no newer ad): reminders on T+1, T+3, T+5 after the first message.
+      const fu=await queueFollowUp(sql,{...base,template:t,runId,today,variables:vars,followKey:key,
+        firstSent:sql`SELECT min(sent_at) AS at FROM wa_messages WHERE dedupe_key=${key} AND status='sent'`});
+      if(fu) ids.push(fu);
     }else if(r.last_end===addDays(today,1)&&r.active_ads>0){
       if(!ready.ENDING) continue;
       const t=free?'T4_ENDING_FREE':'T5_ENDING_TOPUP';
@@ -271,8 +282,15 @@ export async function runCsmWaTriggers(sql:any,runId:number){
 // Runs the live CSM templates on the latest snapshot unless that snapshot was already processed with
 // the same set of live templates. Adding a template later processes it again; the once-per-cycle
 // keys stop anyone getting the same message twice.
+// CSM messages (first messages and T+1/T+3/T+5 reminders) go out from 12 PM IST: the morning sync's
+// snapshot is processed by the first trigger after noon (the 5-minute lead sync, or the CSM workspace).
+export const CSM_SEND_HOUR_IST=12;
 export async function ensureCsmWaRun(sql:any){
   await sendCsmTests(sql);
+  if(new Date(Date.now()+330*60000).getUTCHours()<CSM_SEND_HOUR_IST) return;
+  // CSM messages queued but never sent (e.g. a run cut off part-way) go out on the next trigger.
+  const stuck=await sql`SELECT id FROM wa_messages WHERE workspace='csm' AND status='queued' AND created_at<now()-interval '10 minutes' AND created_at>now()-interval '2 days'`;
+  if(stuck.length) await sendQueuedWa(sql,stuck.map((r:any)=>Number(r.id)));
   const live=(['T1_RENEW','T2_ENDED_FREE','T3_ENDED_TOPUP','T4_ENDING_FREE','T5_ENDING_TOPUP'] as WaTemplate[]).filter(csmLive).join(',');
   if(!CSM_AUTO_SEND||!live) return;
   const claim=await sql`
@@ -287,6 +305,25 @@ export async function ensureCsmWaRun(sql:any){
 export async function resolveCallbackRequests(sql:any,workspace:WaWorkspace,customerId:string|null,leadId?:string|null){
   if(customerId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND customer_id=${customerId} AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
   if(leadId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND lead_id=${leadId}::uuid AND clicked_at IS NOT NULL AND resolved_at IS NULL`;
+}
+
+// CSM reminders: after a merchant's first message for a bucket (the day they enter it), the same
+// message goes again every second day — T+1, T+3, T+5, T+7, … — for as long as they are still in that
+// bucket (T4/T5 "ending tomorrow" lasts one day, so it never gets reminders). Each reminder is sent at
+// most once; if a day's run is missed, it can still go the next day. Only for first messages sent on
+// or after CSM_REMINDERS_FROM, so older merchants don't get a burst.
+export const CSM_REMINDERS_FROM='2026-10-19';
+async function queueFollowUp(sql:any,o:{workspace:'csm';customerId:string;phone:any;template:WaTemplate;runId:number;today:string;variables:Record<string,string>;followKey:string;firstSent:any}){
+  const first=(await o.firstSent)[0]?.at;
+  if(!first) return null;
+  const firstDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date(first));
+  if(firstDay<CSM_REMINDERS_FROM) return null;
+  const days=Math.round((new Date(o.today+'T00:00:00Z').getTime()-new Date(firstDay+'T00:00:00Z').getTime())/86400000);
+  // Every second day: T+1, T+3, T+5, T+7, … (an even day sends the previous slot if a sync was missed).
+  const slot=days<1?0:days%2===1?days:days-1;
+  if(!slot) return null;
+  return queueWa(sql,{workspace:o.workspace,customerId:o.customerId,phone:o.phone,template:o.template,sourceRef:`run:${o.runId}`,
+    dedupeKey:`${o.followKey}|T+${slot}`,variables:o.variables});
 }
 
 // Sends each CSM template in its test stage to its testers, once per tester and platform template.
