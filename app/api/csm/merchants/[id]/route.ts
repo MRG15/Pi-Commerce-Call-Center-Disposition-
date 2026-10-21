@@ -24,13 +24,18 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
   const ads=run?await sql`
     SELECT ma.creative_name,ma.description,ma.ad_status,ma.budget::float8 AS budget,ma.start_date::text AS start_date,ma.end_date::text AS end_date,
       ma.impressions::float8 AS impressions,ma.clicks::float8 AS clicks,ma.ctr::float8 AS ctr,ma.reach::float8 AS reach,ma.spend::float8 AS spend,ma.onboarded_date::text AS onboarded_date,ma.mid,
-      cv.conversions,cv.synced_at AS conversions_as_on
+      COALESCE(ci.conversions,cn.conversions) AS conversions,CASE WHEN ci.n>0 THEN ci.synced_at ELSE cn.synced_at END AS conversions_as_on
     FROM merchant_ads ma
-    -- Conversions from the Ad performance analysis sheet, matched on Cust ID + ad (creative) name.
+    -- Conversations: by Ads ID (AdsRun Raw "Ads ID" = Onboardings_Updated_List Ad_ID); when no row has
+    -- that ID, by Cust ID + ad (creative) name.
+    LEFT JOIN LATERAL (
+      SELECT count(*) AS n,sum(x.conversions)::float8 AS conversions,max(x.synced_at) AS synced_at FROM ad_conversions x
+      WHERE ma.ad_id IS NOT NULL AND x.ad_id=ma.ad_id
+    ) ci ON TRUE
     LEFT JOIN LATERAL (
       SELECT sum(x.conversions)::float8 AS conversions,max(x.synced_at) AS synced_at FROM ad_conversions x
-      WHERE x.customer_id=ma.customer_id AND lower(btrim(x.ad_name))=lower(btrim(ma.creative_name))
-    ) cv ON TRUE
+      WHERE ci.n=0 AND x.customer_id=ma.customer_id AND lower(btrim(x.ad_name))=lower(btrim(ma.creative_name))
+    ) cn ON TRUE
     WHERE ma.sync_run_id=${run.id} AND ma.customer_id=${customerId}
     ORDER BY (ma.ad_status='ACTIVE') DESC,ma.end_date DESC NULLS LAST
   `:[];

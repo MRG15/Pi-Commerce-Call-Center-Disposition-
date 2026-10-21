@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-// "Ad performance analysis" sheet → ad_conversions (scripts/ad-conversions-sync.gs). Each push
+// Onboardings_Updated_List "New" tab (Ad_ID = AdsRun Raw Ads ID) → ad_conversions (scripts/ad-conversions-sync.gs). Each push
 // overwrites the conversions of the ads it contains (the sheet is "as on" its last update).
 // Same secret as the Sub Raw / CSM syncs.
 function sameSecret(a:string,b:string){const aa=Buffer.from(a),bb=Buffer.from(b);return aa.length===bb.length&&timingSafeEqual(aa,bb);}
