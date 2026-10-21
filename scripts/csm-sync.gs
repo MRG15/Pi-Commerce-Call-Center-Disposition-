@@ -130,15 +130,9 @@ function readAds_(sheet) {
   return out;
 }
 
-/** Meta ad ID (header Ad_ID / Ad Id / AdID / Meta Ad ID …). Kept as text; a number shown in
- *  scientific notation (e.g. 1.20E+17) has lost digits, so it is dropped — format the column as plain text. */
+/** "Ads ID" column (col U of AdsRun Raw) — the same ID as col A of meta_failed_ads. Not the Meta ad ID. */
 function adId_(row, col) {
-  const names = ['ad_id', 'adid', 'meta_ad_id', 'facebook_ad_id', 'fb_ad_id'];
-  for (let i = 0; i < names.length; i++) {
-    const v = cell_(row, col, names[i]);
-    if (v) return /^\d+$/.test(v) ? v : '';
-  }
-  return '';
+  return cell_(row, col, 'ads_id') || cell_(row, col, 'Ads ID');
 }
 
 function readTab_(sheet, required) {

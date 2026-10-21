@@ -71,7 +71,7 @@ export async function POST(req:Request){
       rows.push({customer_id:id,client_id:txt(r.clientId),mid:txt(r.mid),merchant_name:txt(r.merchantName),phone_number:txt(r.phone),category:txt(r.category),sub_category:txt(r.subCategory),
         onboarded_date:iso(r.onboardedDate),creative_name:txt(r.creativeName),description:txt(r.description),ad_status:status,budget:num(r.budget),start_date:iso(r.startDate),end_date:iso(r.endDate),
         impressions:num(r.impressions),clicks:num(r.clicks),ctr:num(r.ctr),reach:num(r.reach),spend:num(r.spend),source_row:Number(r.sourceRow)||null,
-        ad_id:/^\d+$/.test(String(r.adId||'').trim())?String(r.adId).trim():null});
+        ad_id:String(r.adId??'').trim()||null});
     }
     if(rows.length) await sql`
       INSERT INTO merchant_ads(sync_run_id,customer_id,client_id,mid,merchant_name,phone_number,category,sub_category,onboarded_date,creative_name,description,ad_status,budget,start_date,end_date,impressions,clicks,ctr,reach,spend,source_row,ad_id)

@@ -22,16 +22,14 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
   const run=await latestCompleteRun(sql);
   const sub=run?await sql`SELECT *,wallet_balance::float8 AS credits,cancelled_at::text AS cancelled_on,expected_renewal_due_date::text AS renewal_due,renewal_date::text AS renewed_on FROM merchant_subscriptions WHERE sync_run_id=${run.id} AND customer_id=${customerId}`:[];
   const ads=run?await sql`
-    SELECT ma.ad_id,ma.creative_name,ma.description,ma.ad_status,ma.budget::float8 AS budget,ma.start_date::text AS start_date,ma.end_date::text AS end_date,
+    SELECT ma.creative_name,ma.description,ma.ad_status,ma.budget::float8 AS budget,ma.start_date::text AS start_date,ma.end_date::text AS end_date,
       ma.impressions::float8 AS impressions,ma.clicks::float8 AS clicks,ma.ctr::float8 AS ctr,ma.reach::float8 AS reach,ma.spend::float8 AS spend,ma.onboarded_date::text AS onboarded_date,ma.mid,
       cv.conversions,cv.synced_at AS conversions_as_on
     FROM merchant_ads ma
-    -- Conversations from the Ad performance analysis sheet: by Meta ad ID when the ad has one,
-    -- otherwise by Cust ID + ad (creative) name.
+    -- Conversions from the Ad performance analysis sheet, matched on Cust ID + ad (creative) name.
     LEFT JOIN LATERAL (
       SELECT sum(x.conversions)::float8 AS conversions,max(x.synced_at) AS synced_at FROM ad_conversions x
-      WHERE CASE WHEN ma.ad_id IS NOT NULL THEN x.ad_id=ma.ad_id
-                 ELSE x.customer_id=ma.customer_id AND lower(btrim(x.ad_name))=lower(btrim(ma.creative_name)) END
+      WHERE x.customer_id=ma.customer_id AND lower(btrim(x.ad_name))=lower(btrim(ma.creative_name))
     ) cv ON TRUE
     WHERE ma.sync_run_id=${run.id} AND ma.customer_id=${customerId}
     ORDER BY (ma.ad_status='ACTIVE') DESC,ma.end_date DESC NULLS LAST
