@@ -31,11 +31,14 @@ export async function GET(req:Request){
     if(!canAccess(user,'onboarding')) return NextResponse.json({error:'Onboarding access required'},{status:403});
     const all=isWorkspaceAdmin(user,'onboarding');
     const rows=await sql`
-      SELECT m.id,m.customer_id,m.template,m.clicked_at,m.click_count,oc.id AS case_id,COALESCE(mi.merchant_name,cu.merchant_name) AS merchant_name,a.name AS owner
+      SELECT m.id,m.customer_id,m.phone,m.template,m.clicked_at,m.click_count,oc.id AS case_id,COALESCE(mi.merchant_name,cu.merchant_name) AS merchant_name,a.name AS owner,
+        m.variables->>'reason' AS reason
       FROM wa_messages m
-      JOIN LATERAL (SELECT id,assigned_to FROM onboarding_cases WHERE customer_id=m.customer_id ORDER BY created_at LIMIT 1) oc ON TRUE
+      -- Voice AI handoffs with no matching case still show (to admins) as unmatched.
+      LEFT JOIN LATERAL (SELECT id,assigned_to FROM onboarding_cases WHERE customer_id=m.customer_id ORDER BY created_at LIMIT 1) oc ON TRUE
       LEFT JOIN merchant_information mi ON mi.customer_id=m.customer_id LEFT JOIN customers cu ON cu.customer_id=m.customer_id LEFT JOIN agents a ON a.id=oc.assigned_to
-      WHERE m.workspace='onboarding' AND m.clicked_at IS NOT NULL AND m.resolved_at IS NULL AND (${all} OR oc.assigned_to=${user.id}::uuid)
+      WHERE m.workspace='onboarding' AND m.clicked_at IS NOT NULL AND m.resolved_at IS NULL AND (oc.id IS NOT NULL OR m.template='VOICE_AI_HANDOFF')
+        AND (${all} OR oc.assigned_to=${user.id}::uuid)
       ORDER BY m.clicked_at DESC LIMIT 100
     `;
     return NextResponse.json({requests:rows});

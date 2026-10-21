@@ -1,11 +1,12 @@
 'use client';
 import { useEffect,useState } from 'react';
 
-// "Req Call Back": merchants who tapped "Request a callback" in a WhatsApp message.
+// "Req Call Back": merchants who tapped "Request a callback" in a WhatsApp message, or whom the
+// onboarding voice AI handed off (VOICE_AI_HANDOFF).
 // The hook keeps the list fresh while the workspace is open (every 15 seconds while the window is in use,
 // on returning to it, and right after a disposition is saved); a request clears once a new disposition is logged for the merchant.
 const TEMPLATE_LABEL:Record<string,string>={SELLER_NOT_CONNECTED:'Not connected nudge',ONB_NOT_CONNECTED:'Not connected nudge',T1_RENEW:'Renewal nudge',
-  T2_ENDED_FREE:'Ads ended',T3_ENDED_TOPUP:'Ads ended · top-up',T4_ENDING_FREE:'Ads ending',T5_ENDING_TOPUP:'Ads ending · top-up'};
+  T2_ENDED_FREE:'Ads ended',T3_ENDED_TOPUP:'Ads ended · top-up',T4_ENDING_FREE:'Ads ending',T5_ENDING_TOPUP:'Ads ending · top-up',VOICE_AI_HANDOFF:'Voice AI handoff'};
 const ago=(t:string)=>{const m=Math.max(0,Math.round((Date.now()-new Date(t).getTime())/60000));return m<60?`${m}m ago`:m<1440?`${Math.round(m/60)}h ago`:`${Math.round(m/1440)}d ago`;};
 
 export function useCallbackRequests(workspace:'seller'|'onboarding'|'csm'){
@@ -27,7 +28,7 @@ export default function CallbackRequestList({rows,onOpen,showOwner,title=true}:{
   {rows.length===0?<div className="empty">No callback requests right now. Merchants who tap "Request a callback" in a WhatsApp message show up here.</div>
   :<div className="req-cb-list">{rows.map(r=><button key={r.id} onClick={()=>onOpen(r)}>
    <strong>{r.merchant_name||(r.customer_id?`Customer ${r.customer_id}`:r.phone)}</strong>
-   <span>{r.customer_id?`Cust ID ${r.customer_id}`:`Lead · ${r.phone||''}`} · {TEMPLATE_LABEL[r.template]||r.template} · {ago(r.clicked_at)}{showOwner&&r.owner?` · ${r.owner}`:''}{r.click_count>1?` · tapped ${r.click_count}×`:''}</span>
+   <span>{r.customer_id?`Cust ID ${r.customer_id}`:`${r.template==='VOICE_AI_HANDOFF'?'Unmatched':'Lead'} · ${r.phone||''}`}{r.template==='VOICE_AI_HANDOFF'&&r.customer_id&&!r.case_id?' · no onboarding case':''} · {TEMPLATE_LABEL[r.template]||r.template}{r.reason?` · ${r.reason}`:''} · {ago(r.clicked_at)}{showOwner&&r.owner?` · ${r.owner}`:''}{r.click_count>1?` · tapped ${r.click_count}×`:''}</span>
   </button>)}</div>}
  </section>;
 }
