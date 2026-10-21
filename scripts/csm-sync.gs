@@ -130,9 +130,12 @@ function readAds_(sheet) {
   return out;
 }
 
-/** "Ads ID" column (col U of AdsRun Raw) — the same ID as col A of meta_failed_ads. Not the Meta ad ID. */
+/** Ads ID: header "Ads ID" / "Ad_ID" / "AdsID" (col U of AdsRun Raw; the same ID as col A of
+ *  meta_failed_ads and Ad_ID in Onboardings_Updated_List). Never Meta_AD_ID. Column U if no header matches. */
 function adId_(row, col) {
-  return cell_(row, col, 'ads_id') || cell_(row, col, 'Ads ID');
+  const names = ['ads_id', 'ad_id', 'adsid', 'adid'];
+  for (let i = 0; i < names.length; i++) if (col[names[i]] !== undefined) return cell_(row, col, names[i]).replace(/\.0$/, '');
+  return String(row[20] == null ? '' : row[20]).trim().replace(/\.0$/, '');
 }
 
 function readTab_(sheet, required) {
