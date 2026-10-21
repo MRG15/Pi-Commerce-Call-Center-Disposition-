@@ -123,10 +123,22 @@ function readAds_(sheet) {
       ctr: cell_(row, data.col, 'CTR'),
       reach: cell_(row, data.col, 'Reach'),
       spend: cell_(row, data.col, 'Spend'),
+      adId: adId_(row, data.col),
       sourceRow: i + 2,
     });
   });
   return out;
+}
+
+/** Meta ad ID (header Ad_ID / Ad Id / AdID / Meta Ad ID …). Kept as text; a number shown in
+ *  scientific notation (e.g. 1.20E+17) has lost digits, so it is dropped — format the column as plain text. */
+function adId_(row, col) {
+  const names = ['ad_id', 'adid', 'meta_ad_id', 'facebook_ad_id', 'fb_ad_id'];
+  for (let i = 0; i < names.length; i++) {
+    const v = cell_(row, col, names[i]);
+    if (v) return /^\d+$/.test(v) ? v : '';
+  }
+  return '';
 }
 
 function readTab_(sheet, required) {
