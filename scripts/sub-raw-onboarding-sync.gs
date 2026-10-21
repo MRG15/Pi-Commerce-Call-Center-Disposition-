@@ -631,7 +631,7 @@ function readFailedAds_(ss) {
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return out;
   const head = values[0].map(normHead_);
-  let adCol = head.indexOf('ads_id');
+  let adCol = firstHeader_(head, ['ads_id', 'ad_id', 'adsid', 'adid']);
   if (adCol < 0) adCol = 0;
   let reasonCol = -1;
   for (let c = 0; c < head.length && reasonCol < 0; c++) if (c !== adCol && /reason|error/.test(head[c])) reasonCol = c;
@@ -665,7 +665,9 @@ function readAdsRunTotals_(ss) {
     col[k] = head.indexOf(ADS_HEADERS[k]);
     if (col[k] < 0) throw new Error('Header "' + ADS_HEADERS[k] + '" missing in ' + ADS_RUN_SHEET);
   });
-  const adsIdCol = head.indexOf('ads_id');
+  // Ads ID: "Ads ID" / "Ad_ID" / "AdsID" header, else column U. Never Meta_AD_ID.
+  let adsIdCol = firstHeader_(head, ['ads_id', 'ad_id', 'adsid', 'adid']);
+  if (adsIdCol < 0 && head.length > 20) adsIdCol = 20;
   for (let r = 1; r < values.length; r++) {
     const id = cleanId_(values[r][col.custId]);
     if (!/^\d+$/.test(id)) continue;
