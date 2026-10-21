@@ -10,9 +10,10 @@
  *
  * Ad data from AdsRun Raw (one row per ad; header CustID for the merchant):
  *   - a merchant with no row in AdsRun Raw has not run an ad
- *   - first ad date   = earliest date in column M across the merchant's rows
- *   - impressions     = sum of column O across the merchant's rows
- *   - spend           = sum of column S across the merchant's rows
+ *   - first ad date   = earliest Ad_Start_Date across the merchant's rows
+ *   - impressions     = sum of Impressions across the merchant's rows
+ *   - spend           = sum of Spend across the merchant's rows
+ *   (columns are found by header name, so they can move)
  *
  * Optional headers (shown on each onboarding case: subscription pills, credits / subscribed
  * date / stage sorting and the stage filter; skipped if the column is missing):
@@ -44,10 +45,8 @@
 
 const SUB_RAW_SHEET = 'Sub Raw';
 const ADS_RUN_SHEET = 'AdsRun Raw';
-// AdsRun Raw columns (0-based): M = first ad date, O = impressions, S = spend.
-const ADS_COL_FIRST_DATE = 12;
-const ADS_COL_IMPRESSIONS = 14;
-const ADS_COL_SPEND = 18;
+// AdsRun Raw columns, found by header name (columns can move): first ad date, impressions, spend.
+const ADS_HEADERS = { custId: 'custid', firstDate: 'ad_start_date', impressions: 'impressions', spend: 'spend' };
 const LOG_SHEET = 'Onboarding Sync Log';
 const TIMEZONE = 'Asia/Kolkata';
 const BATCH_SIZE = 75;
@@ -193,7 +192,7 @@ function syncSubRawOnboarding_(dryRun) {
   });
 
 
-  // Ad data per merchant from AdsRun Raw (columns M / O / S).
+  // Ad data per merchant from AdsRun Raw (Ad_Start_Date / Impressions / Spend).
   const adsByCustomer = readAdsRunTotals_(ss);
 
   /**
@@ -609,29 +608,31 @@ function firstHeader_(headers, names) {
 }
 
 /**
- * AdsRun Raw totals per merchant (header CustID): number of ad rows, earliest date in column M,
- * sum of column O (impressions) and column S (spend).
+ * AdsRun Raw totals per merchant (found by header name): number of ad rows, earliest Ad_Start_Date,
+ * sum of Impressions and sum of Spend.
  */
 function readAdsRunTotals_(ss) {
   const sheet = ss.getSheetByName(ADS_RUN_SHEET);
   if (!sheet) throw new Error('Sheet "' + ADS_RUN_SHEET + '" not found.');
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return {};
-  const head = values[0].map(function(h) { return String(h).trim().toLowerCase(); });
-  const custCol = head.indexOf('custid');
-  if (custCol < 0) throw new Error('Header CustID missing in ' + ADS_RUN_SHEET);
-  console.log('AdsRun Raw columns used: M="' + values[0][ADS_COL_FIRST_DATE] + '", O="' +
-    values[0][ADS_COL_IMPRESSIONS] + '", S="' + values[0][ADS_COL_SPEND] + '"');
+  // "Ad Start Date" / "Ad_Start_Date" / "ad_start_date" all match.
+  const head = values[0].map(function(h) { return String(h).trim().toLowerCase().replace(/[\s-]+/g, '_'); });
+  const col = {};
+  Object.keys(ADS_HEADERS).forEach(function(k) {
+    col[k] = head.indexOf(ADS_HEADERS[k]);
+    if (col[k] < 0) throw new Error('Header "' + ADS_HEADERS[k] + '" missing in ' + ADS_RUN_SHEET);
+  });
   const out = {};
   for (let r = 1; r < values.length; r++) {
-    const id = String(values[r][custCol] == null ? '' : values[r][custCol]).trim().replace(/\.0$/, '');
+    const id = String(values[r][col.custId] == null ? '' : values[r][col.custId]).trim().replace(/\.0$/, '');
     if (!/^\d+$/.test(id)) continue;
     const t = out[id] || (out[id] = { ads: 0, firstAdDate: '', impressions: 0, spend: 0 });
     t.ads++;
-    const d = normalizeSheetDate_(values[r][ADS_COL_FIRST_DATE]);
+    const d = normalizeSheetDate_(values[r][col.firstDate]);
     if (d && (!t.firstAdDate || d < t.firstAdDate)) t.firstAdDate = d;
-    t.impressions += toSheetNumber_(values[r][ADS_COL_IMPRESSIONS]);
-    t.spend += toSheetNumber_(values[r][ADS_COL_SPEND]);
+    t.impressions += toSheetNumber_(values[r][col.impressions]);
+    t.spend += toSheetNumber_(values[r][col.spend]);
   }
   return out;
 }
