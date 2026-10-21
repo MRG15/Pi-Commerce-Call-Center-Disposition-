@@ -14,8 +14,9 @@
  *   - spend           = sum of Spend across the merchant's rows
  *   - Ads ID          = header "Ads ID" (not the Meta ad ID); matched to the meta_failed_ads tab
  *
- * Failed ads from meta_failed_ads (optional tab; Ads ID in the "Ads ID" header, else column A):
- *   - the failure reason (first header containing "reason" / "error") is sent with the merchant
+ * Failed ads from meta_failed_ads (optional tab; Ads ID in ad_id, else column A; merchant through
+ * user_id = Client_ID of AdsRun Raw or Sub Raw's client_id):
+ *   - the failure reason (reason, else error_message / error_summary) is sent with the merchant
  *     and shown on a case reopened as "Ads Live Not Verified"
  *   - a failed ad with no impressions and no spend does not count as an ad run
  *   (columns are found by header name, so they can move)
@@ -181,7 +182,8 @@ function syncSubRawOnboarding_(dryRun) {
     planName: firstHeader_(headers, ['plan_name', 'plan', 'subscription_plan', 'plan_type', 'sub_plan']),
     planAmount: firstHeader_(headers, ['plan_amount', 'subscription_amount', 'plan_price', 'amount']),
     mid: firstHeader_(headers, ['mid', 'merchant_mid', 'merchant_id', 'mid_id']),
-    communicationAddress: firstHeader_(headers, ['communication_address', 'communication address', 'comm_address'])
+    communicationAddress: firstHeader_(headers, ['communication_address', 'communication address', 'comm_address']),
+    clientId: firstHeader_(headers, ['client_id', 'clientid', 'user_id'])
   };
 
   // Plan name sits in column CJ (index 87) when its header is not one of the names above.
@@ -200,7 +202,8 @@ function syncSubRawOnboarding_(dryRun) {
 
 
   // Ad data per merchant from AdsRun Raw (Ad_Start_Date / Impressions / Spend).
-  const adsByCustomer = readAdsRunTotals_(ss);
+  const failedAds = readFailedAds_(ss);
+  const adsByCustomer = readAdsRunTotals_(ss, failedAds);
 
   /**
    * Example:
@@ -259,7 +262,9 @@ function syncSubRawOnboarding_(dryRun) {
 
     const totalSpend = adsRow ? adsRow.spend : 0;
 
-    const adFailReason = adsRow ? adsRow.failReason : '';
+    let adFailReason = adsRow ? adsRow.failReason : '';
+    // Merchant not in AdsRun Raw at all: Sub Raw's client_id against meta_failed_ads user_id.
+    if (!adFailReason && optionalIdx.clientId >= 0) adFailReason = failedAds.byClient[cleanId_(values[r][optionalIdx.clientId])] || '';
 
 
     /**
@@ -623,9 +628,14 @@ function normHead_(h) { return String(h).trim().toLowerCase().replace(/[\s-]+/g,
 
 function cleanId_(v) { return String(v == null ? '' : v).trim().replace(/\.0$/, ''); }
 
-/** meta_failed_ads: Ads ID -> failure reason, plus Cust ID -> reason when the tab has a Cust ID column. */
+/**
+ * meta_failed_ads: failure reason per Ads ID (ad_id) and per merchant. The tab has no Cust ID; its
+ * user_id is AdsRun Raw's Client_ID, so merchants are found through Client_ID (AdsRun Raw, or a
+ * client_id column in Sub Raw). Reason: reason, else error_message, error_summary, meta_rejection_reason.
+ * Later rows win (the tab is in feedback order).
+ */
 function readFailedAds_(ss) {
-  const out = { byAd: {}, byCustomer: {} };
+  const out = { byAd: {}, byCustomer: {}, byClient: {} };
   const sheet = ss.getSheetByName(FAILED_ADS_SHEET);
   if (!sheet) return out;
   const values = sheet.getDataRange().getValues();
@@ -633,25 +643,29 @@ function readFailedAds_(ss) {
   const head = values[0].map(normHead_);
   let adCol = firstHeader_(head, ['ads_id', 'ad_id', 'adsid', 'adid']);
   if (adCol < 0) adCol = 0;
-  let reasonCol = -1;
-  for (let c = 0; c < head.length && reasonCol < 0; c++) if (c !== adCol && /reason|error/.test(head[c])) reasonCol = c;
+  const reasonCols = ['reason', 'error_message', 'error_summary', 'meta_rejection_reason']
+    .map(function(h) { return head.indexOf(h); }).filter(function(c) { return c >= 0; });
   const custCol = firstHeader_(head, ['custid', 'cust_id', 'customer_id', 'merchant_cust_id']);
+  const clientCol = firstHeader_(head, ['user_id', 'client_id']);
   for (let r = 1; r < values.length; r++) {
     const adsId = cleanId_(values[r][adCol]);
     if (!adsId) continue;
-    const reason = reasonCol >= 0 ? String(values[r][reasonCol] == null ? '' : values[r][reasonCol]).trim() : '';
-    out.byAd[adsId] = reason || 'Failed (no reason given)';
+    let reason = '';
+    for (let k = 0; k < reasonCols.length && !reason; k++) reason = String(values[r][reasonCols[k]] == null ? '' : values[r][reasonCols[k]]).trim();
+    reason = reason || 'Failed (no reason given)';
+    out.byAd[adsId] = reason;
     const cust = custCol >= 0 ? cleanId_(values[r][custCol]) : '';
-    if (/^\d+$/.test(cust)) out.byCustomer[cust] = out.byAd[adsId];
+    if (/^\d+$/.test(cust)) out.byCustomer[cust] = reason;
+    const client = clientCol >= 0 ? cleanId_(values[r][clientCol]) : '';
+    if (client) out.byClient[client] = reason;
   }
   return out;
 }
 
-function readAdsRunTotals_(ss) {
+function readAdsRunTotals_(ss, failed) {
   const sheet = ss.getSheetByName(ADS_RUN_SHEET);
   if (!sheet) throw new Error('Sheet "' + ADS_RUN_SHEET + '" not found.');
   const values = sheet.getDataRange().getValues();
-  const failed = readFailedAds_(ss);
   const out = {};
   // Merchants whose failed ad never reached AdsRun Raw still get the reason.
   Object.keys(failed.byCustomer).forEach(function(id) {
@@ -668,9 +682,12 @@ function readAdsRunTotals_(ss) {
   // Ads ID: "Ads ID" / "Ad_ID" / "AdsID" header, else column U. Never Meta_AD_ID.
   let adsIdCol = firstHeader_(head, ['ads_id', 'ad_id', 'adsid', 'adid']);
   if (adsIdCol < 0 && head.length > 20) adsIdCol = 20;
+  const clientCol = firstHeader_(head, ['client_id', 'clientid']);
+  const clientToCust = {};
   for (let r = 1; r < values.length; r++) {
     const id = cleanId_(values[r][col.custId]);
     if (!/^\d+$/.test(id)) continue;
+    if (clientCol >= 0) { const cl = cleanId_(values[r][clientCol]); if (cl) clientToCust[cl] = id; }
     const t = out[id] || (out[id] = { ads: 0, firstAdDate: '', impressions: 0, spend: 0, failReason: '' });
     const impressions = toSheetNumber_(values[r][col.impressions]);
     const spend = toSheetNumber_(values[r][col.spend]);
@@ -684,6 +701,13 @@ function readAdsRunTotals_(ss) {
     t.impressions += impressions;
     t.spend += spend;
   }
+  // Failed ads that never reached AdsRun Raw: merchant through meta_failed_ads user_id = Client_ID.
+  Object.keys(failed.byClient).forEach(function(cl) {
+    const id = clientToCust[cl];
+    if (!id) return;
+    const t = out[id] || (out[id] = { ads: 0, firstAdDate: '', impressions: 0, spend: 0, failReason: '' });
+    if (!t.failReason) t.failReason = failed.byClient[cl];
+  });
   return out;
 }
 
