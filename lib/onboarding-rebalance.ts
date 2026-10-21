@@ -3,12 +3,15 @@
 //                  cases in real time.
 //   Backlog team = everyone else on the Onboarding team (as in Teams; any onboarding access, active).
 //   "No talk yet" = an open case from before today that was never called, or whose latest call is
-//                  Not Connected, with no callback booked for later and never tagged Language Barrier.
+//                  Not Connected, with no callback booked for later, and not a language case (ever
+//                  tagged Language Barrier, or a southern case) — those are rebalanced among the
+//                  onboarders ticked "Language" first (lib/language-routing.ts).
 // The live team's no-talk cases move to the backlog team, and the backlog team's no-talk cases are
 // evened out so each person holds the same number, up to BACKLOG_CAP each. People keep their own
 // cases first; only the excess moves, oldest-touched first going to whoever has the fewest. If the
 // backlog team is full, the rest stay where they are. Each move is logged on the case.
 import { todayIst } from './plans';
+import { LB_ROUTING_FROM,rebalanceLanguageCases } from './language-routing';
 
 export const BACKLOG_CAP=10;
 
@@ -39,8 +42,9 @@ export async function rebalanceOnboardingBacklog(sql:any){
       AND (c.created_at AT TIME ZONE 'Asia/Kolkata')::date<${today}::date
       AND (last.l0_code IS NULL OR last.l0_code='OB_NOT_CONNECTED')
       AND (c.next_callback_at IS NULL OR c.next_callback_at<=now())
-      -- Ever tagged Language Barrier: stays with its owner (who may speak the merchant's language).
+      -- Language cases (ever tagged Language Barrier, or southern): handled by rebalanceLanguageCases.
       AND c.language_barrier_at IS NULL
+      AND NOT (c.sub_south IS TRUE AND c.created_at>=${LB_ROUTING_FROM}::timestamptz)
       AND NOT EXISTS(SELECT 1 FROM onboarding_events lb WHERE lb.onboarding_case_id=c.id AND (lb.l1_code='OB_LANGUAGE_BARRIER' OR lb.l2_code='OB_LANGUAGE_BARRIER'))
     ORDER BY touched ASC
   `;
@@ -84,7 +88,8 @@ export async function runDailyJobs(sql:any){
   if(mins<8*60+30) return;
   const claim=await sql`INSERT INTO daily_jobs(job,run_date) VALUES('onboarding_backlog_rebalance',${todayIst()}::date) ON CONFLICT DO NOTHING RETURNING job`;
   if(!claim[0]) return;
-  let result:any;
-  try{ result=await rebalanceOnboardingBacklog(sql); }catch(e:any){ result={error:String(e?.message||e)}; console.error('backlog rebalance failed',e); }
+  const result:any={};
+  try{ result.language=await rebalanceLanguageCases(sql); }catch(e:any){ result.language={error:String(e?.message||e)}; console.error('language rebalance failed',e); }
+  try{ Object.assign(result,await rebalanceOnboardingBacklog(sql)); }catch(e:any){ result.error=String(e?.message||e); console.error('backlog rebalance failed',e); }
   await sql`UPDATE daily_jobs SET result=${sql.json(result)} WHERE job='onboarding_backlog_rebalance' AND run_date=${todayIst()}::date`;
 }

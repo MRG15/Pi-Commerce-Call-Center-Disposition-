@@ -33,6 +33,8 @@
  *                               otherwise the portal uses the Silver / Gold / Platinum price)
  *   merchant MID               (header mid / merchant_mid / merchant_id; links CleverTap
  *                               payments that arrived without a Cust ID to the right case)
+ *   communication_address      (state / PIN code: southern-state cases go to the onboarders
+ *                               ticked "Language" in Teams)
  *
  * Ads Live verification (done by the portal on every sync):
  *   A case an onboarder marked Ads Live on or before the cutoff date is checked here.
@@ -178,7 +180,8 @@ function syncSubRawOnboarding_(dryRun) {
     expiryDate: headers.indexOf('expected_renewal_due_date'),
     planName: firstHeader_(headers, ['plan_name', 'plan', 'subscription_plan', 'plan_type', 'sub_plan']),
     planAmount: firstHeader_(headers, ['plan_amount', 'subscription_amount', 'plan_price', 'amount']),
-    mid: firstHeader_(headers, ['mid', 'merchant_mid', 'merchant_id', 'mid_id'])
+    mid: firstHeader_(headers, ['mid', 'merchant_mid', 'merchant_id', 'mid_id']),
+    communicationAddress: firstHeader_(headers, ['communication_address', 'communication address', 'comm_address'])
   };
 
   // Plan name sits in column CJ (index 87) when its header is not one of the names above.
@@ -329,6 +332,11 @@ function syncSubRawOnboarding_(dryRun) {
       sourceRow: sourceRow
 
     };
+
+    if (optionalIdx.communicationAddress >= 0) {
+      const addr = values[r][optionalIdx.communicationAddress];
+      deduped[customerId].communicationAddress = String(addr == null ? '' : addr).trim().slice(0, 1000);
+    }
 
     if (optionalIdx.mid >= 0) {
       deduped[customerId].mid = String(values[r][optionalIdx.mid] == null ? '' : values[r][optionalIdx.mid]).trim();

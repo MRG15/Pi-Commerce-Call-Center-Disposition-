@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { loadOnboardingRoster,takeNextOnboarder } from '@/lib/onboarding';
 import { linkCtPayments } from '@/lib/ct';
 import { PLANS } from '@/lib/plans';
+import { regionOf,routeSouthernCases } from '@/lib/language-routing';
 
 type SourceRow = {
   customerId?: unknown;
@@ -14,6 +15,7 @@ type SourceRow = {
   totalImpressions?: unknown;
   totalSpend?: unknown;
   adFailReason?: unknown;
+  communicationAddress?: unknown;
   subscriptionStatus?: unknown;
   cancelledAt?: unknown;
   credits?: unknown;
@@ -36,6 +38,10 @@ type NormalizedRow = {
   totalSpend: number;
   // Failure reason from the meta_failed_ads tab (matched on Ads ID), when the merchant has one.
   adFailKnown: boolean;
+  // State from Sub Raw's communication address (language barrier routing); only when sent.
+  regionKnown: boolean;
+  subState: string|null;
+  subSouth: boolean|null;
   adFailReason: string|null;
   // Sub Raw fields shown on the onboarding case (pills, sorting, stage filter). Only written
   // when the script sent them (older script versions do not).
@@ -113,6 +119,8 @@ function normalizeRow(raw:SourceRow):NormalizedRow|null{
     totalImpressions:impressions??0,
     totalSpend:spend??0,
     adFailKnown:raw.adFailReason!==undefined,
+    regionKnown:raw.communicationAddress!==undefined,
+    ...(()=>{const r=regionOf(raw.communicationAddress);return {subState:r.state,subSouth:r.south};})(),
     adFailReason:String(raw.adFailReason??'').trim().slice(0,500)||null,
     subFieldsKnown:raw.subscriptionStatus!==undefined,
     subscriptionStatus:String(raw.subscriptionStatus??'').trim().toUpperCase()||null,
@@ -432,19 +440,26 @@ export async function POST(req:Request){
   // Sub Raw fields on every matching case (pills, sorting, stage filter on the onboarding screen).
   const subFields=[...deduped.values()].filter(r=>r.subFieldsKnown).map(r=>({customer_id:r.customerId,status:r.subscriptionStatus,
     cancelled_at:r.cancelledAt,credits:r.credits,stage:r.lastCompletedStage,plan_known:r.planKnown,plan:r.planName,amount:r.planAmount,expiry_known:r.expiryKnown,expiry:r.expiryDate,
-    fail_known:r.adFailKnown,fail:r.adFailReason}));
+    fail_known:r.adFailKnown,fail:r.adFailReason,region_known:r.regionKnown,state:r.subState,south:r.subSouth}));
   if(!dryRun&&subFields.length){
     await sql`
       UPDATE onboarding_cases c SET sub_status=x.status,sub_cancelled_at=x.cancelled_at::date,sub_credits=x.credits,
         last_completed_stage=x.stage,sub_plan_name=CASE WHEN x.plan_known AND c.sub_plan_name IS NULL THEN x.plan ELSE c.sub_plan_name END,
         sub_plan_amount=CASE WHEN x.plan_known THEN x.amount ELSE c.sub_plan_amount END,
         sub_expiry_date=CASE WHEN x.expiry_known THEN x.expiry::date ELSE c.sub_expiry_date END,
-        ad_fail_reason=CASE WHEN x.fail_known THEN x.fail ELSE c.ad_fail_reason END,sub_synced_at=now()
-      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text,plan_known boolean,plan text,amount numeric,expiry_known boolean,expiry text,fail_known boolean,fail text)
+        ad_fail_reason=CASE WHEN x.fail_known THEN x.fail ELSE c.ad_fail_reason END,
+        sub_state=CASE WHEN x.region_known THEN x.state ELSE c.sub_state END,sub_south=CASE WHEN x.region_known THEN x.south ELSE c.sub_south END,sub_synced_at=now()
+      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text,plan_known boolean,plan text,amount numeric,expiry_known boolean,expiry text,fail_known boolean,fail text,region_known boolean,state text,south boolean)
       WHERE c.customer_id=x.customer_id
     `;
   }
   (summary as any).subFieldsUpdated=dryRun?0:subFields.length;
+
+  // Southern cases (from the communication address just stored) go to the language team once.
+  if(!dryRun){
+    try{ (summary as any).languageRouting=await routeSouthernCases(sql); }
+    catch(e:any){ console.error('language routing failed',e); (summary as any).languageRouting={error:String(e?.message||e)}; }
+  }
 
   // CleverTap payments that came with only a MID: link them now that Sub Raw (or AdsRun Raw) gives
   // the Cust ID, and put the employee code on the case if it has none.
