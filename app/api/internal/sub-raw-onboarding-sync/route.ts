@@ -60,7 +60,8 @@ type NormalizedRow = {
   mid: string|null;
 };
 
-// An onboarder-marked Ads Live case is checked against AdsRun Raw once it is at least a day old:
+// An Ads Live case — marked by an onboarder or externally by this sync — is checked against AdsRun
+// Raw once it is at least a day old:
 //   REOPEN – no ad has run (no AdsRun Raw row, or only failed ads with 0 impressions and 0 spend)
 //   OK     – anything else, and rows without delivery fields
 type LiveCheck='OK'|'REOPEN';
@@ -72,8 +73,8 @@ function sheetNumber(value:unknown):number|null{
   return Number.isFinite(n)&&n>=0?n:null;
 }
 
-function checkOnboarderLive(c:any,row:NormalizedRow,cutoffDate:string):LiveCheck{
-  if(c.current_status!=='ads_live' || c.has_external) return 'OK';
+function checkAdsLive(c:any,row:NormalizedRow,cutoffDate:string):LiveCheck{
+  if(c.current_status!=='ads_live') return 'OK';
   if(!c.ads_live_day || c.ads_live_day>cutoffDate) return 'OK';
   if(!row.deliveryKnown || row.totalAdsExecuted>0) return 'OK';
   if(row.totalImpressions===0 && row.totalSpend===0) return 'REOPEN';
@@ -232,7 +233,7 @@ export async function POST(req:Request){
           summary.actions.push({customerId:row.customerId,action:`CREATE_OPEN_${target.name.toUpperCase()}`});
         }
       }else if(c.current_status==='ads_live' || c.ads_live_at){
-        const check=checkOnboarderLive(c,row,cutoffDate);
+        const check=checkAdsLive(c,row,cutoffDate);
         if(check==='REOPEN'){
           summary.adsLiveReopened++;
           summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
@@ -327,7 +328,7 @@ export async function POST(req:Request){
       }
 
       if(c.current_status==='ads_live' || c.ads_live_at){
-        const check=checkOnboarderLive(c,row,cutoffDate);
+        const check=checkAdsLive(c,row,cutoffDate);
         if(check==='OK'){
           summary.alreadyAdsLive++;
           return;
@@ -338,10 +339,20 @@ export async function POST(req:Request){
           WHERE onboarding_case_id=${c.id}::uuid
         `;
         const checkAttempt=Number(checkAttemptRows[0]?.n||1);
-        // Marked Ads Live by an onboarder, but AdsRun Raw shows no ad has run. Keep the onboarder's
-        // Ads Live entry in the history and put the case back in the open queue; clearing ads_live_at
-        // takes it out of the Ads Live counts, rate and incentives. A meta_failed_ads reason is kept on the case.
+        // Marked Ads Live (by an onboarder, or externally by an earlier sync), but AdsRun Raw shows no ad
+        // has run. Keep the Ads Live entry in the history and put the case back in the open queue;
+        // clearing ads_live_at takes it out of the Ads Live counts, rate and incentives. An external
+        // Ads Live is marked reversed so the case no longer counts as externally live (and an onboarder
+        // who later makes it live gets the credit). A meta_failed_ads reason is kept on the case.
         const failNote=row.adFailReason?` Meta failure reason: ${row.adFailReason}.`:'';
+        // An externally-live case may never have had an owner: it goes to the next onboarder in the rotation.
+        const owner=c.assigned_to?null:takeNextOnboarder(roster);
+        if(c.has_external){
+          await tx`
+            UPDATE onboarding_events SET l0_code='SYSTEM_EXTERNAL_ADS_LIVE_REVERSED',l0_label_snapshot='Externally Ads Live (reversed)'
+            WHERE onboarding_case_id=${c.id}::uuid AND l0_code='SYSTEM_EXTERNAL_ADS_LIVE'
+          `;
+        }
         await tx`
           INSERT INTO onboarding_events(
             onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,source_row,
@@ -350,14 +361,15 @@ export async function POST(req:Request){
           VALUES(
             ${c.id}::uuid,${row.customerId},${checkAttempt},'system','AdsRun Raw',${row.sourceRow},
             'SYSTEM_ADS_LIVE_NOT_VERIFIED','Ads Live Not Verified',
-            ${`Marked Ads Live on ${c.ads_live_day}, but AdsRun Raw shows no ad has run (0 ads, 0 impressions, 0 spend) as of ${cutoffDate}.${failNote} Case reopened by the T-1 sync.`}
+            ${`${c.has_external?'Marked Ads Live externally':'Marked Ads Live'} on ${c.ads_live_day}, but AdsRun Raw shows no ad has run (0 ads, 0 impressions, 0 spend) as of ${cutoffDate}.${failNote} Case reopened by the T-1 sync${owner?` and assigned to ${owner.name}`:''}.`}
           )
         `;
         await tx`
           UPDATE onboarding_cases
           SET current_l0='Ads Live Not Verified',current_l1=NULL,current_l2=NULL,current_status='open',
               ads_live_at=NULL,closed_at=NULL,next_callback_at=now(),last_activity_at=now(),updated_at=now(),
-              reopened_at=now(),reopen_reason='no_ad_ran',ad_fail_reason=${row.adFailReason}
+              reopened_at=now(),reopen_reason='no_ad_ran',ad_fail_reason=${row.adFailReason},
+              assigned_to=COALESCE(assigned_to,${owner?.id??null}::uuid),assigned_at=CASE WHEN assigned_to IS NULL THEN now() ELSE assigned_at END
           WHERE id=${c.id}::uuid
         `;
         summary.adsLiveReopened++;
