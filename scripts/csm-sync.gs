@@ -123,10 +123,16 @@ function readAds_(sheet) {
       ctr: cell_(row, data.col, 'CTR'),
       reach: cell_(row, data.col, 'Reach'),
       spend: cell_(row, data.col, 'Spend'),
+      adId: adId_(row, data.col),
       sourceRow: i + 2,
     });
   });
   return out;
+}
+
+/** "Ads ID" column (col U of AdsRun Raw) — the same ID as col A of meta_failed_ads. Not the Meta ad ID. */
+function adId_(row, col) {
+  return cell_(row, col, 'ads_id') || cell_(row, col, 'Ads ID');
 }
 
 function readTab_(sheet, required) {

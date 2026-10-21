@@ -220,7 +220,7 @@ export async function runCsmWaTriggers(sql:any,runId:number){
           AND e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED')) AS closed,
         (c.current_status='open' AND c.reopen_reason IS NOT NULL) AS reopened
       FROM merchant_subscriptions s
-      LEFT JOIN (SELECT customer_id,sum(impressions)::float8 AS impressions,max(end_date) AS last_end,count(*) FILTER (WHERE ad_status='ACTIVE')::int AS active_ads,
+      LEFT JOIN (SELECT customer_id,(array_agg(impressions::float8 ORDER BY end_date DESC NULLS LAST,start_date DESC NULLS LAST))[1] AS impressions,max(end_date) AS last_end,count(*) FILTER (WHERE ad_status='ACTIVE')::int AS active_ads,
                    max(merchant_name) AS name,max(phone_number) AS phone FROM merchant_ads WHERE sync_run_id=${runId} GROUP BY customer_id) a ON a.customer_id=s.customer_id
       LEFT JOIN LATERAL (SELECT current_status,reopen_reason FROM onboarding_cases WHERE customer_id=s.customer_id ORDER BY created_at LIMIT 1) c ON TRUE
       WHERE s.sync_run_id=${runId} AND (a.customer_id IS NOT NULL OR COALESCE(s.completed_ads_count,0)>0)

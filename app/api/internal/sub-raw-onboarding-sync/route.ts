@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { loadOnboardingRoster,takeNextOnboarder } from '@/lib/onboarding';
 import { linkCtPayments } from '@/lib/ct';
 import { PLANS } from '@/lib/plans';
+import { regionOf,routeSouthernCases } from '@/lib/language-routing';
 
 type SourceRow = {
   customerId?: unknown;
@@ -13,7 +14,8 @@ type SourceRow = {
   sourceRow?: unknown;
   totalImpressions?: unknown;
   totalSpend?: unknown;
-  latestAdStatus?: unknown;
+  adFailReason?: unknown;
+  communicationAddress?: unknown;
   subscriptionStatus?: unknown;
   cancelledAt?: unknown;
   credits?: unknown;
@@ -34,7 +36,13 @@ type NormalizedRow = {
   deliveryKnown: boolean;
   totalImpressions: number;
   totalSpend: number;
-  latestAdStatus: string;
+  // Failure reason from the meta_failed_ads tab (matched on Ads ID), when the merchant has one.
+  adFailKnown: boolean;
+  // State from Sub Raw's communication address (language barrier routing); only when sent.
+  regionKnown: boolean;
+  subState: string|null;
+  subSouth: boolean|null;
+  adFailReason: string|null;
   // Sub Raw fields shown on the onboarding case (pills, sorting, stage filter). Only written
   // when the script sent them (older script versions do not).
   subFieldsKnown: boolean;
@@ -52,13 +60,10 @@ type NormalizedRow = {
   mid: string|null;
 };
 
-// An onboarder-marked Ads Live case is checked against Sub Raw once it is at least a day old:
-//   REOPEN        – no ad has ever run (0 ads executed, 0 impressions, 0 spend)
-//   REOPEN_FAILED – the ad did run (impressions or spend) but its latest status is FAILED
-//   OK            – anything else, including PAUSED and rows without delivery fields
-// Both reopen cases go back to Open, flagged so onboarders can filter them and so the CSM
-// queues leave them out until the first ad is properly live.
-type LiveCheck='OK'|'REOPEN'|'REOPEN_FAILED';
+// An onboarder-marked Ads Live case is checked against AdsRun Raw once it is at least a day old:
+//   REOPEN – no ad has run (no AdsRun Raw row, or only failed ads with 0 impressions and 0 spend)
+//   OK     – anything else, and rows without delivery fields
+type LiveCheck='OK'|'REOPEN';
 
 function sheetNumber(value:unknown):number|null{
   const t=String(value??'').replace(/,/g,'').trim();
@@ -72,7 +77,6 @@ function checkOnboarderLive(c:any,row:NormalizedRow,cutoffDate:string):LiveCheck
   if(!c.ads_live_day || c.ads_live_day>cutoffDate) return 'OK';
   if(!row.deliveryKnown || row.totalAdsExecuted>0) return 'OK';
   if(row.totalImpressions===0 && row.totalSpend===0) return 'REOPEN';
-  if(row.latestAdStatus==='FAILED') return 'REOPEN_FAILED';
   return 'OK';
 }
 
@@ -114,7 +118,10 @@ function normalizeRow(raw:SourceRow):NormalizedRow|null{
     deliveryKnown:impressions!==null&&spend!==null,
     totalImpressions:impressions??0,
     totalSpend:spend??0,
-    latestAdStatus:String(raw.latestAdStatus??'').trim().toUpperCase(),
+    adFailKnown:raw.adFailReason!==undefined,
+    regionKnown:raw.communicationAddress!==undefined,
+    ...(()=>{const r=regionOf(raw.communicationAddress);return {subState:r.state,subSouth:r.south};})(),
+    adFailReason:String(raw.adFailReason??'').trim().slice(0,500)||null,
     subFieldsKnown:raw.subscriptionStatus!==undefined,
     subscriptionStatus:String(raw.subscriptionStatus??'').trim().toUpperCase()||null,
     cancelledAt:isIsoDate(String(raw.cancelledAt??'').trim())?String(raw.cancelledAt).trim():null,
@@ -229,9 +236,6 @@ export async function POST(req:Request){
         if(check==='REOPEN'){
           summary.adsLiveReopened++;
           summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
-        }else if(check==='REOPEN_FAILED'){
-          summary.adFailedAfterLiveReopened++;
-          summary.actions.push({customerId:row.customerId,action:'REOPEN_AD_FAILED_AFTER_LIVE'});
         }else{
           summary.alreadyAdsLive++;
         }
@@ -334,37 +338,30 @@ export async function POST(req:Request){
           WHERE onboarding_case_id=${c.id}::uuid
         `;
         const checkAttempt=Number(checkAttemptRows[0]?.n||1);
-        // Marked Ads Live by an onboarder, but Sub Raw shows no ad has run, or the ad ran and then
-        // failed. Keep the onboarder's Ads Live entry in the history and put the case back in the
-        // open queue; clearing ads_live_at takes it out of the Ads Live counts, rate and incentives.
-        const failed=check==='REOPEN_FAILED';
+        // Marked Ads Live by an onboarder, but AdsRun Raw shows no ad has run. Keep the onboarder's
+        // Ads Live entry in the history and put the case back in the open queue; clearing ads_live_at
+        // takes it out of the Ads Live counts, rate and incentives. A meta_failed_ads reason is kept on the case.
+        const failNote=row.adFailReason?` Meta failure reason: ${row.adFailReason}.`:'';
         await tx`
           INSERT INTO onboarding_events(
             onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,source_row,
             l0_code,l0_label_snapshot,remark
           )
           VALUES(
-            ${c.id}::uuid,${row.customerId},${checkAttempt},'system','Sub Raw',${row.sourceRow},
-            ${failed?'SYSTEM_AD_FAILED_AFTER_LIVE':'SYSTEM_ADS_LIVE_NOT_VERIFIED'},${failed?'Ad Failed After Live':'Ads Live Not Verified'},
-            ${failed
-              ?`Marked Ads Live on ${c.ads_live_day}; the ad ran (${row.totalImpressions} impressions, Rs ${row.totalSpend} spent) but its latest status is FAILED as of ${cutoffDate}. Case reopened by the T-1 sync.`
-              :`Marked Ads Live on ${c.ads_live_day}, but Sub Raw shows no ad has run (0 ads executed, 0 impressions, 0 spend) as of ${cutoffDate}. Case reopened by the T-1 sync.`}
+            ${c.id}::uuid,${row.customerId},${checkAttempt},'system','AdsRun Raw',${row.sourceRow},
+            'SYSTEM_ADS_LIVE_NOT_VERIFIED','Ads Live Not Verified',
+            ${`Marked Ads Live on ${c.ads_live_day}, but AdsRun Raw shows no ad has run (0 ads, 0 impressions, 0 spend) as of ${cutoffDate}.${failNote} Case reopened by the T-1 sync.`}
           )
         `;
         await tx`
           UPDATE onboarding_cases
-          SET current_l0=${failed?'Ad Failed After Live':'Ads Live Not Verified'},current_l1=NULL,current_l2=NULL,current_status='open',
+          SET current_l0='Ads Live Not Verified',current_l1=NULL,current_l2=NULL,current_status='open',
               ads_live_at=NULL,closed_at=NULL,next_callback_at=now(),last_activity_at=now(),updated_at=now(),
-              reopened_at=now(),reopen_reason=${failed?'ad_failed':'no_ad_ran'}
+              reopened_at=now(),reopen_reason='no_ad_ran',ad_fail_reason=${row.adFailReason}
           WHERE id=${c.id}::uuid
         `;
-        if(failed){
-          summary.adFailedAfterLiveReopened++;
-          summary.actions.push({customerId:row.customerId,action:'REOPEN_AD_FAILED_AFTER_LIVE'});
-        }else{
-          summary.adsLiveReopened++;
-          summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
-        }
+        summary.adsLiveReopened++;
+        summary.actions.push({customerId:row.customerId,action:'REOPEN_ADS_LIVE_NOT_VERIFIED'});
         return;
       }
       if(c.current_status==='lost' && isLiveAsOfCutoff){
@@ -442,18 +439,27 @@ export async function POST(req:Request){
 
   // Sub Raw fields on every matching case (pills, sorting, stage filter on the onboarding screen).
   const subFields=[...deduped.values()].filter(r=>r.subFieldsKnown).map(r=>({customer_id:r.customerId,status:r.subscriptionStatus,
-    cancelled_at:r.cancelledAt,credits:r.credits,stage:r.lastCompletedStage,plan_known:r.planKnown,plan:r.planName,amount:r.planAmount,expiry_known:r.expiryKnown,expiry:r.expiryDate}));
+    cancelled_at:r.cancelledAt,credits:r.credits,stage:r.lastCompletedStage,plan_known:r.planKnown,plan:r.planName,amount:r.planAmount,expiry_known:r.expiryKnown,expiry:r.expiryDate,
+    fail_known:r.adFailKnown,fail:r.adFailReason,region_known:r.regionKnown,state:r.subState,south:r.subSouth}));
   if(!dryRun&&subFields.length){
     await sql`
       UPDATE onboarding_cases c SET sub_status=x.status,sub_cancelled_at=x.cancelled_at::date,sub_credits=x.credits,
         last_completed_stage=x.stage,sub_plan_name=CASE WHEN x.plan_known AND c.sub_plan_name IS NULL THEN x.plan ELSE c.sub_plan_name END,
         sub_plan_amount=CASE WHEN x.plan_known THEN x.amount ELSE c.sub_plan_amount END,
-        sub_expiry_date=CASE WHEN x.expiry_known THEN x.expiry::date ELSE c.sub_expiry_date END,sub_synced_at=now()
-      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text,plan_known boolean,plan text,amount numeric,expiry_known boolean,expiry text)
+        sub_expiry_date=CASE WHEN x.expiry_known THEN x.expiry::date ELSE c.sub_expiry_date END,
+        ad_fail_reason=CASE WHEN x.fail_known THEN x.fail ELSE c.ad_fail_reason END,
+        sub_state=CASE WHEN x.region_known THEN x.state ELSE c.sub_state END,sub_south=CASE WHEN x.region_known THEN x.south ELSE c.sub_south END,sub_synced_at=now()
+      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text,plan_known boolean,plan text,amount numeric,expiry_known boolean,expiry text,fail_known boolean,fail text,region_known boolean,state text,south boolean)
       WHERE c.customer_id=x.customer_id
     `;
   }
   (summary as any).subFieldsUpdated=dryRun?0:subFields.length;
+
+  // Southern cases (from the communication address just stored) go to the language team once.
+  if(!dryRun){
+    try{ (summary as any).languageRouting=await routeSouthernCases(sql); }
+    catch(e:any){ console.error('language routing failed',e); (summary as any).languageRouting={error:String(e?.message||e)}; }
+  }
 
   // CleverTap payments that came with only a MID: link them now that Sub Raw (or AdsRun Raw) gives
   // the Cust ID, and put the employee code on the case if it has none.

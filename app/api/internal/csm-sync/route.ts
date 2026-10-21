@@ -70,14 +70,15 @@ export async function POST(req:Request){
       if(!id||!['ACTIVE','COMPLETED'].includes(status)){invalid.push(Number(r.sourceRow)||0);continue;}
       rows.push({customer_id:id,client_id:txt(r.clientId),mid:txt(r.mid),merchant_name:txt(r.merchantName),phone_number:txt(r.phone),category:txt(r.category),sub_category:txt(r.subCategory),
         onboarded_date:iso(r.onboardedDate),creative_name:txt(r.creativeName),description:txt(r.description),ad_status:status,budget:num(r.budget),start_date:iso(r.startDate),end_date:iso(r.endDate),
-        impressions:num(r.impressions),clicks:num(r.clicks),ctr:num(r.ctr),reach:num(r.reach),spend:num(r.spend),source_row:Number(r.sourceRow)||null});
+        impressions:num(r.impressions),clicks:num(r.clicks),ctr:num(r.ctr),reach:num(r.reach),spend:num(r.spend),source_row:Number(r.sourceRow)||null,
+        ad_id:String(r.adId??'').trim()||null});
     }
     if(rows.length) await sql`
-      INSERT INTO merchant_ads(sync_run_id,customer_id,client_id,mid,merchant_name,phone_number,category,sub_category,onboarded_date,creative_name,description,ad_status,budget,start_date,end_date,impressions,clicks,ctr,reach,spend,source_row)
+      INSERT INTO merchant_ads(sync_run_id,customer_id,client_id,mid,merchant_name,phone_number,category,sub_category,onboarded_date,creative_name,description,ad_status,budget,start_date,end_date,impressions,clicks,ctr,reach,spend,source_row,ad_id)
       SELECT ${runId},x.customer_id,x.client_id,x.mid,x.merchant_name,x.phone_number,x.category,x.sub_category,x.onboarded_date::date,x.creative_name,x.description,x.ad_status,
-        x.budget,x.start_date::date,x.end_date::date,x.impressions,x.clicks,x.ctr,x.reach,x.spend,x.source_row
+        x.budget,x.start_date::date,x.end_date::date,x.impressions,x.clicks,x.ctr,x.reach,x.spend,x.source_row,x.ad_id
       FROM jsonb_to_recordset(${sql.json(rows)}::jsonb) AS x(customer_id text,client_id text,mid text,merchant_name text,phone_number text,category text,sub_category text,onboarded_date text,
-        creative_name text,description text,ad_status text,budget numeric,start_date text,end_date text,impressions numeric,clicks numeric,ctr numeric,reach numeric,spend numeric,source_row int)
+        creative_name text,description text,ad_status text,budget numeric,start_date text,end_date text,impressions numeric,clicks numeric,ctr numeric,reach numeric,spend numeric,source_row int,ad_id text)
     `;
     return NextResponse.json({ok:true,accepted:rows.length,invalidRows:invalid});
   }
