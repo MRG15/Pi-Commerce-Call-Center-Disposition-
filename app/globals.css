@@ -66,3 +66,12 @@
 .dl-row{display:flex;gap:8px;flex-wrap:wrap}a.csv-btn{text-decoration:none;display:inline-block}
 /* Onboarding cases sold by the Merchant Lending team or a Premium accounts e-code: yellow, to prioritise. */
 .case-list>button.ml{background:#fff4b8;border-color:#f2cf3d}.case-list>button.ml:hover,.case-list>button.ml.selected{background:#ffec8f;border-color:#e0b800}
+/* Onboarding admins: floating "not contacted in 10 minutes" list (components/StaleCasesAlert). */
+.stale-alert{position:fixed;right:16px;bottom:16px;z-index:50;width:300px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #f5c2c0;border-radius:12px;box-shadow:0 8px 30px rgba(0,41,112,.15);overflow:hidden;font-size:13px}
+.stale-head{display:flex;justify-content:space-between;align-items:center;width:100%;padding:10px 12px;background:#fdecea;border:0;color:#b42318;cursor:pointer}
+.stale-head span{font-size:12px;color:#6b7280}
+.stale-cta{padding:8px 12px 4px;color:#b42318;font-weight:600}
+.stale-list{max-height:320px;overflow:auto;padding:4px 6px 8px}
+.stale-list button{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:7px 8px;border:0;background:none;border-radius:8px;cursor:pointer;text-align:left}
+.stale-list button:hover{background:#f5f7fb}
+.stale-list span{color:#6b7280;font-size:12px}

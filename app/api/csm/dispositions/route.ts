@@ -15,7 +15,8 @@ export async function GET(){
       UNION ALL
       SELECT n.id,n.code,n.label,n.level,n.parent_id,n.sort_order FROM onboarding_disposition_nodes n JOIN tree t ON n.parent_id=t.id WHERE n.active=TRUE
     )
-    SELECT * FROM tree ORDER BY level,sort_order,label
+    -- "Contacted 7 times" is an onboarding-only reason.
+    SELECT * FROM tree WHERE code<>'OB_NI_CONTACTED_7_TIMES' ORDER BY level,sort_order,label
   `;
   return NextResponse.json({nodes:rows});
 }
