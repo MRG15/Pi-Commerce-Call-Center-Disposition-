@@ -3,6 +3,7 @@ import { NextResponse,after } from 'next/server';
 import { db } from '@/lib/db';
 import { retryOnboardingNoPhone,ensureCsmWaRun } from '@/lib/wa';
 import { runDailyJobs } from '@/lib/onboarding-rebalance';
+import { syncPicomDnd } from '@/lib/clevertap-dnd';
 import { ingestLeads,linkLeadsToCustomers,linkAfterMerchantSync,assignUnassignedLeads } from '@/lib/leadgen';
 
 // Lead Gen Ads sheet → portal (scripts/leadgen-sync.gs, every 5 minutes). Takes the sheet's new
@@ -36,5 +37,7 @@ export async function POST(req:Request){
   // And for the CSM WhatsApps at 12 PM (once per day's snapshot), after the response so the
   // sheet script isn't kept waiting while they send.
   after(async()=>{await ensureCsmWaRun(sql).catch((e:any)=>console.error('csm whatsapp error',e));});
+  // Not Interested / Refund merchants -> Picom_dnd on OCL CleverTap (lib/clevertap-dnd.ts).
+  after(async()=>{await syncPicomDnd(sql).catch((e:any)=>console.error('picom dnd error',e));});
   return NextResponse.json({ok:true,received:rows.length,...ingest,linked,assigned});
 }
