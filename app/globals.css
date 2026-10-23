@@ -66,3 +66,13 @@
 .dl-row{display:flex;gap:8px;flex-wrap:wrap}a.csv-btn{text-decoration:none;display:inline-block}
 /* Onboarding cases sold by the Merchant Lending team or a Premium accounts e-code: yellow, to prioritise. */
 .case-list>button.ml{background:#fff4b8;border-color:#f2cf3d}.case-list>button.ml:hover,.case-list>button.ml.selected{background:#ffec8f;border-color:#e0b800}
+/* Onboarding admins: "No action in past 10 min" pill at the top (components/StaleCasesAlert). */
+.stale-alert{position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:50;display:flex;flex-direction:column;align-items:center;max-width:calc(100vw - 32px)}
+.stale-pill{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;border:1px solid #f5c2c0;background:#fff;color:#7a271a;font-size:13px;box-shadow:0 4px 16px rgba(0,41,112,.12);cursor:pointer;white-space:nowrap}
+.stale-pill b{color:#b42318;font-weight:600}
+.stale-dot{width:8px;height:8px;border-radius:50%;background:#d92d20;box-shadow:0 0 0 3px rgba(217,45,32,.15)}
+.stale-list{margin-top:6px;width:320px;max-width:calc(100vw - 32px);max-height:300px;overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 30px rgba(0,41,112,.15);padding:4px}
+.stale-list button{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;width:100%;padding:8px 10px;border:0;background:none;border-radius:8px;cursor:pointer;text-align:left;font-size:13px}
+.stale-list button:hover{background:#f5f7fb}
+.stale-list span{color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stale-list em{font-style:normal;color:#b42318;font-size:12px}
