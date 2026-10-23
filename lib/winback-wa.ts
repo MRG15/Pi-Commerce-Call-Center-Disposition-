@@ -1,7 +1,7 @@
 // Win-back WhatsApp (testimonial) for merchants marked Not Interested / Refund Requested — an onboarding
 // case closed as lost, or ever by a CSM (the Picom_dnd bucket). They get no other WhatsApp (waSuppressed).
 // Template from the sub-category: optical / eye -> WB_OPTICAL; spa, salon, parlour, beautician -> WB_SPA;
-// everyone else -> WB_GENERIC. Sent from 12 PM IST like the CSM reminders: the first message, then
+// everyone else -> WB_GENERIC. Sent between 12 PM and 7 PM IST like the CSM reminders: the first message, then
 // every second day — T+1, T+3, T+5, … — for as long as they stay in the bucket.
 // Rollout: until app_settings.winback_wa_live is true, only the test merchant gets each template once.
 import { queueWa,sendQueuedWa,merchantContact,waReady,type WaTemplate } from './wa';
@@ -9,6 +9,7 @@ import { todayIst } from './plans';
 
 export const WB_TEMPLATES:WaTemplate[]=['WB_OPTICAL','WB_SPA','WB_GENERIC'];
 const WB_SEND_HOUR_IST=12;
+const WB_STOP_HOUR_IST=19; // nothing to merchants after 7 PM; what is left goes the next day
 const PER_RUN=150; // per 5-minute trigger, so a big first day spreads over a few runs
 const TEST_CUSTOMER='518726118';
 
@@ -26,7 +27,8 @@ const slotFor=(days:number|null)=>days===null?0:days<1?null:days%2===1?days:days
 export async function runWinbackWa(sql:any){
   if(!WB_TEMPLATES.every(waReady)) return {skipped:'templates not ready'};
   const tests=await sendWinbackTests(sql);
-  if(new Date(Date.now()+330*60000).getUTCHours()<WB_SEND_HOUR_IST) return {tests,skipped:'before 12 PM'};
+  const hour=new Date(Date.now()+330*60000).getUTCHours();
+  if(hour<WB_SEND_HOUR_IST||hour>=WB_STOP_HOUR_IST) return {tests,skipped:'outside 12 PM-7 PM'};
   const live=(await sql`SELECT value FROM app_settings WHERE key='winback_wa_live'`)[0]?.value===true;
   if(!live) return {tests,skipped:'not live'};
   const today=todayIst();
