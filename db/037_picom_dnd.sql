@@ -19,3 +19,5 @@ CREATE TABLE IF NOT EXISTS picom_dnd_pushes(
 );
 CREATE INDEX IF NOT EXISTS picom_dnd_pushes_status_idx ON picom_dnd_pushes(status);
 INSERT INTO app_settings(key,value) VALUES('picom_dnd_enroll','false'::jsonb) ON CONFLICT (key) DO NOTHING;
+-- Win-back testimonial WhatsApp (lib/winback-wa.ts): off until the test is confirmed.
+INSERT INTO app_settings(key,value) VALUES('winback_wa_live','false'::jsonb) ON CONFLICT (key) DO NOTHING;
