@@ -5,7 +5,8 @@ import { randomBytes } from 'crypto';
 import { currentPlanOf } from './plan-upgrade';
 import { planLabel } from './plans';
 
-export type WaTemplate='SELLER_NOT_CONNECTED'|'ONB_NOT_CONNECTED'|'T1_RENEW'|'T2_ENDED_FREE'|'T3_ENDED_TOPUP'|'T4_ENDING_FREE'|'T5_ENDING_TOPUP'|'T1_RENEW_NEXT';
+export type WaTemplate='SELLER_NOT_CONNECTED'|'ONB_NOT_CONNECTED'|'T1_RENEW'|'T2_ENDED_FREE'|'T3_ENDED_TOPUP'|'T4_ENDING_FREE'|'T5_ENDING_TOPUP'|'T1_RENEW_NEXT'
+  |'WB_OPTICAL'|'WB_SPA'|'WB_GENERIC';
 export type WaWorkspace='seller'|'onboarding'|'csm';
 export const SELLER_WA_L0=['l0_voicemail','l0_disconnected','l0_not_connected'];
 // Credits a plan starts with, for onboarding messages sent before Sub Raw has the merchant.
@@ -68,6 +69,14 @@ export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];c
   T3_ENDED_TOPUP:{name:'tthree_ended_topup_wcl',body:['merchant_name','impressions','credits'],callbackButton:'1'},
   T4_ENDING_FREE:{name:'tfour_ending_free_wcl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
   T5_ENDING_TOPUP:{name:'tfive_ending_topup_wcl',body:['merchant_name','ad_end_date','credits'],callbackButton:'1'},
+  // Win-back testimonials for Not Interested / Refund merchants (lib/winback-wa.ts); the generic one
+  // uses the optical template.
+  WB_OPTICAL:{name:'pi_ad_status_nice_optical',body:['merchant_name'],callbackButton:'0',
+    headerImage:'https://d1ydhiubt2jbeg.cloudfront.net/1599143300/assets/a03cbaebd6404a55b1cb1a82c26fb076.mp4'},
+  WB_SPA:{name:'pi_ad_status_ojas_spa',body:['merchant_name'],callbackButton:'0',
+    headerImage:'https://d1ydhiubt2jbeg.cloudfront.net/1599143300/assets/c7aea8d8ca314469baeef17d3a69b37d.mp4'},
+  WB_GENERIC:{name:'pi_ad_status_nice_optical',body:['merchant_name'],callbackButton:'0',
+    headerImage:'https://d1ydhiubt2jbeg.cloudfront.net/1599143300/assets/a03cbaebd6404a55b1cb1a82c26fb076.mp4'},
 };
 // Test stage for CSM templates: while a template has testers here it goes only to them (once each,
 // with sample merchant details) and no merchant gets it. Remove its entry to send to merchants.

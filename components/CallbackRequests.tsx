@@ -6,7 +6,7 @@ import { useEffect,useState } from 'react';
 // The hook keeps the list fresh while the workspace is open (every 15 seconds while the window is in use,
 // on returning to it, and right after a disposition is saved); a request clears once a new disposition is logged for the merchant.
 const TEMPLATE_LABEL:Record<string,string>={SELLER_NOT_CONNECTED:'Not connected nudge',ONB_NOT_CONNECTED:'Not connected nudge',T1_RENEW:'Renewal nudge',
-  T2_ENDED_FREE:'Ads ended',T3_ENDED_TOPUP:'Ads ended · top-up',T4_ENDING_FREE:'Ads ending',T5_ENDING_TOPUP:'Ads ending · top-up',VOICE_AI_HANDOFF:'Voice AI handoff'};
+  T2_ENDED_FREE:'Ads ended',T3_ENDED_TOPUP:'Ads ended · top-up',T4_ENDING_FREE:'Ads ending',T5_ENDING_TOPUP:'Ads ending · top-up',VOICE_AI_HANDOFF:'Voice AI handoff',WB_OPTICAL:'Win-back testimonial',WB_SPA:'Win-back testimonial',WB_GENERIC:'Win-back testimonial'};
 const ago=(t:string)=>{const m=Math.max(0,Math.round((Date.now()-new Date(t).getTime())/60000));return m<60?`${m}m ago`:m<1440?`${Math.round(m/60)}h ago`:`${Math.round(m/1440)}d ago`;};
 
 export function useCallbackRequests(workspace:'seller'|'onboarding'|'csm'){
