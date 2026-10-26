@@ -29,7 +29,7 @@ export async function buildPayoutWorkbook(report:any,byName:Map<string,any>,from
       r.getCell(5).value=a?.employee_id?Number(a.employee_id)||a.employee_id:null; r.getCell(6).value=a?.email||null;
       if(!a?.employee_id) r.getCell(5).fill=yellow; if(!a?.email) r.getCell(6).fill=yellow;
       r.getCell(7).value=p.sales; r.getCell(8).value=round(p.sellerDaily); r.getCell(9).value=round(p.weeklyBonus+p.revenuePay+p.teamShare);
-      r.getCell(10).value=p.adsLiveCases; r.getCell(11).value=round(p.casePay); r.getCell(12).value=round(p.topUpPay+p.renewalPay);
+      r.getCell(10).value=p.adsLiveCases; r.getCell(11).value=round(p.casePay); r.getCell(12).value=round(p.topUpPay+p.renewalPay+(p.csmPay||0)); // incl. the CSM revenue sprint
       r.getCell(13).value={formula:`H${rowNo}+I${rowNo}+K${rowNo}+L${rowNo}`,result:round(p.total)};
       [8,9,11,12,13].forEach(i=>r.getCell(i).numFmt=money);
       rowNo++;
