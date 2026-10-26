@@ -79,17 +79,17 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
   const seller=sellerIncentives(saleDays,from!,to!);
   const revenueWeeks=sellerRevenueIncentives(sellerSales,roles,from!,to!,earnsSales);
   const planDaily=sellerPlanDailyIncentives(sellerSales,roles,from!,to!,earnsSales);
-  // CSM revenue sprint (26–31 Oct 2026): a CSM's renewals and plan upgrades in the sprint are priced
-  // as one total (csmSprintPay) instead of one by one; everything else stays on the normal plan.
+  // CSM revenue sprint (26–31 Oct 2026): a CSM's renewals, top-ups and plan upgrades in the sprint are
+  // priced as one total (csmSprintPay) instead of one by one; Ads Live cases stay on the normal plan.
   const inSprint=(person:string,date:string)=>Boolean(planOn(CSM_SPRINT_PLANS,date))&&(teams.length?earnsOn(teams,['csm'],person,date):false);
   const sprintLines:{date:string;person:string;customerId:string;amount:number;kind:string}[]=[];
   const renewalRows=renewals.map((r:any)=>({date:r.date,person:r.credited_to,amount:Number(r.plan_amount||0),customerId:String(r.customer_id)}));
   const topUpRows=topUps.map((t:any)=>({date:t.date,person:t.person,amount:Number(t.amount),customerId:String(t.customer_id),kind:String(t.kind||'Top-up')}));
   for(const r of renewalRows) if(r.date>=from&&r.date<=to&&inSprint(r.person,r.date)) sprintLines.push({...r,kind:'Subscription renewal'});
-  for(const t of topUpRows) if(t.kind==='Plan upgrade'&&inSprint(t.person,t.date)) sprintLines.push(t);
+  for(const t of topUpRows) if(inSprint(t.person,t.date)) sprintLines.push(t);
   const onboarder=onboarderIncentives(
     adsLive.map((c:any)=>({date:c.date,person:c.person})),
-    [...topUpRows.filter((t:any)=>!(t.kind==='Plan upgrade'&&inSprint(t.person,t.date))),...BACKFILLED_TOP_UPS],
+    [...topUpRows.filter((t:any)=>!inSprint(t.person,t.date)),...BACKFILLED_TOP_UPS],
     from!,to!,
     renewalRows.filter((r:any)=>!inSprint(r.person,r.date)),
     earnsOnboarding,
@@ -130,7 +130,7 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
   for(const t of [...topUps.map((x:any)=>({date:x.date,person:x.person,amount:Number(x.amount),customerId:String(x.customer_id||''),note:'',kind:String(x.kind||'Top-up')})),...BACKFILLED_TOP_UPS.map(b=>({...b,kind:'Top-up'}))]){
     const plan=planOn(ONBOARDER_PLANS,t.date);
     if(t.date<from||t.date>to||!plan) continue;
-    if(t.kind==='Plan upgrade'&&inSprint(t.person,t.date)) continue;
+    if(inSprint(t.person,t.date)) continue;
     const ok=eligibleOb(t.person,t.date);
     raw.push({section:'Top-up',date:t.date,person:t.person,customer:t.customerId||t.note||'',detail:t.kind+(ok?'':' · not eligible that day'),amount:t.amount,incentive:ok?topUpPay(plan,t.amount):0});
   }

@@ -76,9 +76,9 @@ export const SELLER_PLAN_DAILY_PLANS:SellerPlanDailyPlan[] = [
   { from:'2026-11-11', name:'Daily plan incentive', ladders:DAILY_LADDERS },
 ];
 
-// CSM revenue sprint 26–31 Oct 2026: each CSM's revenue from subscriptions closed in the period
-// (Subscription Renewed + Plan Upgraded logged in the CSM / Onboarding workspace) is priced as one
-// total instead of per instance: nothing on the first ₹1,000, 5% on ₹1,000–5,000, 10% on
+// CSM revenue sprint 26–31 Oct 2026 (back to the per-instance rules from 1 Nov): each CSM's revenue
+// in the period — Subscription Renewed, top-ups and Plan Upgraded — is priced as one total instead of
+// per instance: nothing on the first ₹1,000, 5% on ₹1,000–5,000, 10% on
 // ₹5,000–30,000; reaching ₹30,000 doubles everything so far (₹5,400) and every rupee above earns 20%.
 export type CsmSprintPlan = { from:string; to:string; name:string };
 export const CSM_SPRINT_PLANS:CsmSprintPlan[] = [
