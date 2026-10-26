@@ -76,3 +76,11 @@
 .stale-list button:hover{background:#f5f7fb}
 .stale-list span{color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stale-list em{font-style:normal;color:#b42318;font-size:12px}
+/* Incentives tab: "How Incentives Work" plan cards. */
+.plan-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.plan-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:#fbfcfe}
+.plan-card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.plan-card-head b{color:var(--navy);font-size:14px}
+.plan-card-head em{font-style:normal;color:var(--muted);font-size:12px;margin-left:auto}
+.plan-team{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;background:#eef8ff;color:var(--navy);border-radius:999px;padding:3px 8px}
+.plan-card p{margin:2px 0;font-size:13px;color:var(--text);line-height:1.45}

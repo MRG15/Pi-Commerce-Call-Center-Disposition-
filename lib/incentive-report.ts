@@ -4,6 +4,7 @@
 import {
   countSales,countedSales,sellerIncentives,sellerRevenueIncentives,sellerPlanDailyIncentives,onboarderIncentives,mondayOf,BACKFILLED_TOP_UPS,SELLER_PLAN_DAILY_PLANS,
   SELLER_DAILY_PLANS,SELLER_WEEKLY_PLANS,SELLER_REVENUE_PLANS,ONBOARDER_PLANS,SALE_COUNTING_RULES,SELLER_ROSTER,ONBOARDER_ROSTER,isMember,planOn,topUpPay,
+  CSM_SPRINT_PLANS,csmSprintPay,
 } from '@/lib/incentives';
 import { loadSellerRoles } from '@/lib/seller-roles';
 import { loadTeamChanges,earnsOn,teamStateOn } from '@/lib/teams';
@@ -78,23 +79,37 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
   const seller=sellerIncentives(saleDays,from!,to!);
   const revenueWeeks=sellerRevenueIncentives(sellerSales,roles,from!,to!,earnsSales);
   const planDaily=sellerPlanDailyIncentives(sellerSales,roles,from!,to!,earnsSales);
+  // CSM revenue sprint (26–31 Oct 2026): a CSM's renewals and plan upgrades in the sprint are priced
+  // as one total (csmSprintPay) instead of one by one; everything else stays on the normal plan.
+  const inSprint=(person:string,date:string)=>Boolean(planOn(CSM_SPRINT_PLANS,date))&&(teams.length?earnsOn(teams,['csm'],person,date):false);
+  const sprintLines:{date:string;person:string;customerId:string;amount:number;kind:string}[]=[];
+  const renewalRows=renewals.map((r:any)=>({date:r.date,person:r.credited_to,amount:Number(r.plan_amount||0),customerId:String(r.customer_id)}));
+  const topUpRows=topUps.map((t:any)=>({date:t.date,person:t.person,amount:Number(t.amount),customerId:String(t.customer_id),kind:String(t.kind||'Top-up')}));
+  for(const r of renewalRows) if(r.date>=from&&r.date<=to&&inSprint(r.person,r.date)) sprintLines.push({...r,kind:'Subscription renewal'});
+  for(const t of topUpRows) if(t.kind==='Plan upgrade'&&inSprint(t.person,t.date)) sprintLines.push(t);
   const onboarder=onboarderIncentives(
     adsLive.map((c:any)=>({date:c.date,person:c.person})),
-    [...topUps.map((t:any)=>({date:t.date,person:t.person,amount:Number(t.amount),customerId:String(t.customer_id)})),...BACKFILLED_TOP_UPS],
+    [...topUpRows.filter((t:any)=>!(t.kind==='Plan upgrade'&&inSprint(t.person,t.date))),...BACKFILLED_TOP_UPS],
     from!,to!,
-    renewals.map((r:any)=>({date:r.date,person:r.credited_to,amount:Number(r.plan_amount||0),customerId:String(r.customer_id)})),
+    renewalRows.filter((r:any)=>!inSprint(r.person,r.date)),
     earnsOnboarding,
   );
+  const csmSprint=[...sprintLines.reduce((m,l)=>{
+    const plan=planOn(CSM_SPRINT_PLANS,l.date)!;const k=`${plan.from}|${l.person}`;
+    const r=m.get(k)||{periodFrom:plan.from,periodTo:plan.to,person:l.person,plan:plan.name,count:0,revenue:0,pay:0};
+    r.count++; r.revenue+=l.amount; m.set(k,r); return m;
+  },new Map<string,any>()).values()].map(r=>({...r,revenue:round(r.revenue),pay:csmSprintPay(r.revenue)})).sort((a,b)=>b.pay-a.pay);
 
   const people=new Map<string,any>();
-  const person=(name:string)=>{const p=people.get(name)||{name,sales:0,sellerDaily:0,weeklyBonus:0,revenue:0,revenuePay:0,teamShare:0,adsLiveCases:0,casePay:0,topUps:0,topUpValue:0,topUpPay:0,renewals:0,renewalValue:0,renewalPay:0,total:0};people.set(name,p);return p;};
+  const person=(name:string)=>{const p=people.get(name)||{name,sales:0,sellerDaily:0,weeklyBonus:0,revenue:0,revenuePay:0,teamShare:0,adsLiveCases:0,casePay:0,topUps:0,topUpValue:0,topUpPay:0,renewals:0,renewalValue:0,renewalPay:0,csmRevenue:0,csmPay:0,total:0};people.set(name,p);return p;};
   for(const r of seller.daily){const p=person(r.person);p.sales+=r.sales;p.sellerDaily+=r.pay;}
   for(const r of seller.weekly){if(r.pay>0)person(r.person).weeklyBonus+=r.pay;}
   // Daily plan incentive (from 1 Oct) is shown under Seller Daily; its sales are already counted via the weekly rows.
   for(const r of planDaily){person(r.person).sellerDaily+=r.pay;}
   for(const r of revenueWeeks){const p=person(r.person);p.sales+=r.sales;p.revenue+=r.revenue;p.revenuePay+=r.slabPay;p.teamShare+=r.teamShare;}
   for(const r of onboarder){const p=person(r.person);p.adsLiveCases+=r.cases;p.casePay+=r.casePay;p.topUps+=r.topUps;p.topUpValue+=r.topUpValue;p.topUpPay+=r.topUpPay;p.renewals+=r.renewals;p.renewalValue+=r.renewalValue;p.renewalPay+=r.renewalPay;}
-  const summary=[...people.values()].map(p=>({...p,topUpPay:round(p.topUpPay),renewalPay:round(p.renewalPay),teamShare:round(p.teamShare),total:round(p.sellerDaily+p.weeklyBonus+p.revenuePay+p.teamShare+p.casePay+p.topUpPay+p.renewalPay)}))
+  for(const r of csmSprint){const p=person(r.person);p.csmRevenue+=r.revenue;p.csmPay+=r.pay;}
+  const summary=[...people.values()].map(p=>({...p,topUpPay:round(p.topUpPay),renewalPay:round(p.renewalPay),teamShare:round(p.teamShare),csmPay:round(p.csmPay),total:round(p.sellerDaily+p.weeklyBonus+p.revenuePay+p.teamShare+p.casePay+p.topUpPay+p.renewalPay+p.csmPay)}))
     .sort((a,b)=>b.total-a.total||a.name.localeCompare(b.name));
   const sum=(k:string)=>round(summary.reduce((s,p)=>s+Number(p[k]||0),0));
 
@@ -115,15 +130,19 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
   for(const t of [...topUps.map((x:any)=>({date:x.date,person:x.person,amount:Number(x.amount),customerId:String(x.customer_id||''),note:'',kind:String(x.kind||'Top-up')})),...BACKFILLED_TOP_UPS.map(b=>({...b,kind:'Top-up'}))]){
     const plan=planOn(ONBOARDER_PLANS,t.date);
     if(t.date<from||t.date>to||!plan) continue;
+    if(t.kind==='Plan upgrade'&&inSprint(t.person,t.date)) continue;
     const ok=eligibleOb(t.person,t.date);
     raw.push({section:'Top-up',date:t.date,person:t.person,customer:t.customerId||t.note||'',detail:t.kind+(ok?'':' · not eligible that day'),amount:t.amount,incentive:ok?topUpPay(plan,t.amount):0});
   }
   for(const t of renewals){
     const plan=planOn(ONBOARDER_PLANS,t.date);
     if(t.date<from||t.date>to||!plan?.paysRenewals) continue;
+    if(inSprint(t.credited_to,t.date)) continue;
     const ok=eligibleOb(t.credited_to,t.date);
     raw.push({section:'Subscription renewal',date:t.date,person:t.credited_to,customer:String(t.customer_id||''),detail:'Subscription renewal'+(ok?'':' · not eligible that day'),amount:Number(t.plan_amount||0),incentive:ok?topUpPay(plan,Number(t.plan_amount||0)):0});
   }
+  for(const l of sprintLines) raw.push({section:'CSM revenue sprint (26–31 Oct)',date:l.date,person:l.person,customer:l.customerId,detail:l.kind,amount:l.amount});
+  for(const r of csmSprint) raw.push({section:'CSM revenue sprint incentive',date:r.periodFrom,weekEnd:r.periodTo,person:r.person,detail:r.plan,count:r.count,amount:r.revenue,incentive:r.pay});
   raw.sort((a,b)=>a.person.localeCompare(b.person)||a.section.localeCompare(b.section)||a.date.localeCompare(b.date));
   // Each person's team on the last day of the period (Sales / Onboarding / CSM).
   const teamOf=(name:string)=>(['sales','onboarding','csm'] as const).find(t=>teamStateOn(teams,name,t,to)?.member)||'';
@@ -131,13 +150,14 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
 
   return {
     from,to,raw,
-    totals:{payout:sum('total'),sellerDaily:sum('sellerDaily'),weeklyBonus:sum('weeklyBonus'),revenue:sum('revenue'),revenuePay:round(sum('revenuePay')+sum('teamShare')),casePay:sum('casePay'),topUpPay:sum('topUpPay'),renewals:sum('renewals'),renewalValue:sum('renewalValue'),renewalPay:sum('renewalPay'),sales:sum('sales'),adsLiveCases:sum('adsLiveCases'),topUps:sum('topUps'),topUpValue:sum('topUpValue')},
+    totals:{payout:sum('total'),sellerDaily:sum('sellerDaily'),weeklyBonus:sum('weeklyBonus'),revenue:sum('revenue'),revenuePay:round(sum('revenuePay')+sum('teamShare')),casePay:sum('casePay'),topUpPay:sum('topUpPay'),renewals:sum('renewals'),renewalValue:sum('renewalValue'),renewalPay:sum('renewalPay'),csmRevenue:sum('csmRevenue'),csmPay:sum('csmPay'),sales:sum('sales'),adsLiveCases:sum('adsLiveCases'),topUps:sum('topUps'),topUpValue:sum('topUpValue')},
     people:summary,
     sellerDaily:seller.daily.filter(r=>r.sales>0),
     sellerWeekly:seller.weekly,
     sellerRevenueWeekly:revenueWeeks,
     sellerPlanDaily:planDaily,
     onboarderDaily:onboarder,
-    plans:{sellerDaily:SELLER_DAILY_PLANS,sellerPlanDaily:SELLER_PLAN_DAILY_PLANS,sellerWeekly:SELLER_WEEKLY_PLANS,sellerRevenue:SELLER_REVENUE_PLANS,roles,onboarder:ONBOARDER_PLANS,saleCounting:SALE_COUNTING_RULES,sellerRoster:SELLER_ROSTER,onboarderRoster:ONBOARDER_ROSTER},
+    csmSprint,
+    plans:{csmSprint:CSM_SPRINT_PLANS,sellerDaily:SELLER_DAILY_PLANS,sellerPlanDaily:SELLER_PLAN_DAILY_PLANS,sellerWeekly:SELLER_WEEKLY_PLANS,sellerRevenue:SELLER_REVENUE_PLANS,roles,onboarder:ONBOARDER_PLANS,saleCounting:SALE_COUNTING_RULES,sellerRoster:SELLER_ROSTER,onboarderRoster:ONBOARDER_ROSTER},
   }
 }

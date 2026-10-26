@@ -30,12 +30,18 @@ export const SELLER_WEEKLY_PLANS:WeeklyPlan[] = [
 // Seller weekly revenue plan from 1 Oct 2026 (Thu): weeks run Mon–Sun, the first one 1–4 Oct.
 // Slabs are cumulative: reaching each threshold adds its payout. A TL earns SBDE slabs on their
 // own revenue plus half of what each of their BDEs earns that week.
+// Booster week 26–31 Oct 2026 (Mon–Sat): every slab payout doubled. A Sunday 1 Nov sale falls back
+// under the normal plan and is priced on its own.
+const WEEKLY_REVENUE_SLABS={
+  BDE:[{at:30000,pay:2000},{at:50000,pay:3000},{at:100000,pay:5000}],
+  SBDE:[{at:40000,pay:3000},{at:80000,pay:5000},{at:140000,pay:6000}],
+  TL:[{at:40000,pay:3000},{at:80000,pay:5000},{at:140000,pay:6000}],
+};
+const doubled=(slabs:typeof WEEKLY_REVENUE_SLABS)=>Object.fromEntries(Object.entries(slabs).map(([k,v])=>[k,v.map(x=>({at:x.at,pay:x.pay*2}))])) as typeof WEEKLY_REVENUE_SLABS;
 export const SELLER_REVENUE_PLANS:SellerRevenuePlan[] = [
-  { from:'2026-10-01', name:'Weekly revenue', tlShareOfBde:0.5, slabs:{
-    BDE:[{at:30000,pay:2000},{at:50000,pay:3000},{at:100000,pay:5000}],
-    SBDE:[{at:40000,pay:3000},{at:80000,pay:5000},{at:140000,pay:6000}],
-    TL:[{at:40000,pay:3000},{at:80000,pay:5000},{at:140000,pay:6000}],
-  } },
+  { from:'2026-10-01', to:'2026-10-25', name:'Weekly revenue', tlShareOfBde:0.5, slabs:WEEKLY_REVENUE_SLABS },
+  { from:'2026-10-26', to:'2026-10-31', name:'Booster week (2x)', tlShareOfBde:0.5, slabs:doubled(WEEKLY_REVENUE_SLABS) },
+  { from:'2026-11-01', name:'Weekly revenue', tlShareOfBde:0.5, slabs:WEEKLY_REVENUE_SLABS },
 ];
 
 // Onboarder / CSM plan from 1 Sep 2026: Ads Live cases (daily ladder) + per-instance top-ups.
@@ -62,13 +68,27 @@ export const SALE_COUNTING_RULES:SaleCountingRule[] = [
 // sale of its new plan.
 export type PlanLadder = { unlock:number; unlockPay:number; extra:number };
 export type SellerPlanDailyPlan = { from:string; to?:string; name:string; ladders:Record<'silver'|'gold'|'platinum',PlanLadder> };
+// Diwali bonus 26 Oct – 10 Nov 2026: +₹500 on every Platinum sale.
+const DAILY_LADDERS={silver:{unlock:4,unlockPay:200,extra:100},gold:{unlock:2,unlockPay:300,extra:200},platinum:{unlock:1,unlockPay:300,extra:300}};
 export const SELLER_PLAN_DAILY_PLANS:SellerPlanDailyPlan[] = [
-  { from:'2026-10-01', name:'Daily plan incentive', ladders:{
-    silver:{unlock:4,unlockPay:200,extra:100},
-    gold:{unlock:2,unlockPay:300,extra:200},
-    platinum:{unlock:1,unlockPay:300,extra:300},
-  } },
+  { from:'2026-10-01', to:'2026-10-25', name:'Daily plan incentive', ladders:DAILY_LADDERS },
+  { from:'2026-10-26', to:'2026-11-10', name:'Daily plan + Diwali Platinum bonus', ladders:{...DAILY_LADDERS,platinum:{unlock:1,unlockPay:800,extra:800}} },
+  { from:'2026-11-11', name:'Daily plan incentive', ladders:DAILY_LADDERS },
 ];
+
+// CSM revenue sprint 26–31 Oct 2026: each CSM's revenue from subscriptions closed in the period
+// (Subscription Renewed + Plan Upgraded logged in the CSM / Onboarding workspace) is priced as one
+// total instead of per instance: nothing on the first ₹1,000, 5% on ₹1,000–5,000, 10% on
+// ₹5,000–30,000; reaching ₹30,000 doubles everything so far (₹5,400) and every rupee above earns 20%.
+export type CsmSprintPlan = { from:string; to:string; name:string };
+export const CSM_SPRINT_PLANS:CsmSprintPlan[] = [
+  { from:'2026-10-26', to:'2026-10-31', name:'CSM revenue sprint' },
+];
+export function csmSprintPay(revenue:number){
+  const band=(lo:number,hi:number,rate:number)=>Math.max(0,Math.min(revenue,hi)-lo)*rate;
+  const base=band(1000,5000,0.05)+band(5000,30000,0.10);
+  return Math.round((revenue>=30000?base*2+(revenue-30000)*0.20:base)*100)/100;
+}
 
 export function planLadderPay(l:PlanLadder,n:number){
   return n<l.unlock?0:l.unlockPay+(n-l.unlock)*l.extra;
@@ -253,22 +273,23 @@ export type RevenueWeekRow = { weekStart:string; weekEnd:string; person:string; 
 export function sellerRevenueIncentives(sales:CountedSale[],roles:SellerRoleRow[],from:string,to:string,earns?:(person:string,date:string)=>boolean):RevenueWeekRow[]{
   type Seg={weekStart:string;weekEnd:string;plan:SellerRevenuePlan;person:string;role:SellerRole;teamLead:string|null;activeFrom:string;activeTo:string;revenue:number;sales:number};
   const segs=new Map<string,Seg>();
-  const keyOf=(weekStart:string,person:string,role:string,teamLead:string|null)=>`${weekStart}|${person}|${role}|${teamLead||''}`;
+  const keyOf=(weekStart:string,person:string,role:string,teamLead:string|null,plan='')=>`${weekStart}|${person}|${role}|${teamLead||''}|${plan}`;
   // Days of the week (from the plan start) on which `person` held this exact role and team.
-  const windowOf=(weekStart:string,weekEnd:string,planFrom:string,person:string,role:SellerRole,teamLead:string|null)=>{
+  const windowOf=(weekStart:string,weekEnd:string,plan:SellerRevenuePlan,person:string,role:SellerRole,teamLead:string|null)=>{
     let a='',b='';
-    for(let d=weekStart<planFrom?planFrom:weekStart;d<=weekEnd;d=addDays(d,1)){
+    const last=plan.to&&plan.to<weekEnd?plan.to:weekEnd;
+    for(let d=weekStart<plan.from?plan.from:weekStart;d<=last;d=addDays(d,1)){
       const r=roleOn(roles,person,d);
       if(r&&r.role===role&&(r.teamLead||null)===teamLead){ if(!a)a=d; b=d; }
     }
     return {a,b};
   };
   const segOf=(weekStart:string,plan:SellerRevenuePlan,person:string,role:SellerRole,teamLead:string|null)=>{
-    const k=keyOf(weekStart,person,role,teamLead);
+    const k=keyOf(weekStart,person,role,teamLead,plan.from);
     let g=segs.get(k);
     if(!g){
       const weekEnd=addDays(weekStart,6);
-      const {a,b}=windowOf(weekStart,weekEnd,plan.from,person,role,teamLead);
+      const {a,b}=windowOf(weekStart,weekEnd,plan,person,role,teamLead);
       g={weekStart,weekEnd,plan,person,role,teamLead,activeFrom:a,activeTo:b,revenue:0,sales:0};
       segs.set(k,g);
     }
@@ -298,7 +319,7 @@ export function sellerRevenueIncentives(sales:CountedSale[],roles:SellerRoleRow[
     if(leadRole?.role!=='TL') continue;
     if(earns&&!earns(r.teamLead,r.activeTo)) continue;
     const plan=planOn(SELLER_REVENUE_PLANS,r.activeTo)!;
-    const k=keyOf(r.weekStart,r.teamLead,'TL',null);
+    const k=keyOf(r.weekStart,r.teamLead,'TL',null,plan.from);
     let lead=rows.get(k);
     if(!lead){
       const g=segOf(r.weekStart,plan,r.teamLead,'TL',null);

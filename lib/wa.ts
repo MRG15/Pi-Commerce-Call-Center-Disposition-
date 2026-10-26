@@ -229,12 +229,14 @@ export async function runCsmWaTriggers(sql:any,runId:number){
           AND e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED')) AS closed,
         (c.current_status='open' AND c.reopen_reason IS NOT NULL) AS reopened
       FROM merchant_subscriptions s
-      LEFT JOIN (SELECT customer_id,(array_agg(impressions::float8 ORDER BY end_date DESC NULLS LAST,start_date DESC NULLS LAST))[1] AS impressions,max(end_date) AS last_end,count(*) FILTER (WHERE ad_status='ACTIVE')::int AS active_ads,
+      LEFT JOIN (SELECT customer_id,(array_agg(impressions::float8 ORDER BY end_date DESC NULLS LAST,start_date DESC NULLS LAST))[1] AS impressions,sum(impressions::float8) AS total_impressions,max(end_date) AS last_end,count(*) FILTER (WHERE ad_status='ACTIVE')::int AS active_ads,
                    max(merchant_name) AS name,max(phone_number) AS phone FROM merchant_ads WHERE sync_run_id=${runId} GROUP BY customer_id) a ON a.customer_id=s.customer_id
       LEFT JOIN LATERAL (SELECT current_status,reopen_reason FROM onboarding_cases WHERE customer_id=s.customer_id ORDER BY created_at LIMIT 1) c ON TRUE
       WHERE s.sync_run_id=${runId} AND (a.customer_id IS NOT NULL OR COALESCE(s.completed_ads_count,0)>0)
     )
-    SELECT * FROM m WHERE NOT COALESCE(onb_lost,FALSE) AND NOT closed AND NOT COALESCE(reopened,FALSE)
+    -- No WhatsApp to merchants whose ads got no impressions: none at all across their ads, or (for
+    -- T1–T3, which quote it) none on the last ad.
+    SELECT * FROM m WHERE NOT COALESCE(onb_lost,FALSE) AND NOT closed AND NOT COALESCE(reopened,FALSE) AND COALESCE(total_impressions,0)>0
   `;
   const addDays=(d:string,n:number)=>new Date(new Date(d+'T00:00:00Z').getTime()+n*86400000).toISOString().slice(0,10);
   const ids:number[]=[];
@@ -246,6 +248,7 @@ export async function runCsmWaTriggers(sql:any,runId:number){
       // Once per lapse whichever T1 template version sent it (switching the platform template doesn't resend).
       const had=await sql`SELECT 1 FROM wa_messages WHERE template='T1_RENEW' AND customer_id=${String(r.customer_id)} AND status IN ('sent','skipped')
         AND (dedupe_key=${`T1_RENEW|${r.customer_id}|${cycle}`} OR dedupe_key LIKE ${`T1_RENEW|%|${r.customer_id}|${cycle}`}) LIMIT 1`;
+      if(!(Number(r.impressions)>0)) continue;
       const t1vars={merchant_name:r.name||'',impressions:fmtCount(r.impressions??0)};
       if(had[0]){
         // Still lapsed: reminders on T+1, T+3, T+5 after the first message.
@@ -264,7 +267,7 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     if(!r.last_end) continue;
     const free=Number(r.credits||0)>=1000;
     if(r.last_end<=today){
-      if(!ready.ENDED) continue;
+      if(!ready.ENDED||!(Number(r.impressions)>0)) continue;
       const t=free?'T2_ENDED_FREE':'T3_ENDED_TOPUP';
       const key=`ENDED|${r.customer_id}|${r.last_end}`;
       const vars={merchant_name:r.name||'',impressions:fmtCount(r.impressions??0),credits:fmtMoney(r.credits??0)};
