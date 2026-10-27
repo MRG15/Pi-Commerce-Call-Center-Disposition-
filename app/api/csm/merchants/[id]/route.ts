@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { paytmRequestHolder } from '@/lib/paytm-callbacks';
 import { currentUserAccess } from '@/lib/workspace-access';
 import { csmRole,latestCompleteRun } from '@/lib/csm';
 
@@ -17,7 +18,7 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
       SELECT 1 FROM csm_assignments WHERE customer_id=${customerId} AND agent_id=${user.id}::uuid
       UNION ALL SELECT 1 FROM (SELECT current_status FROM onboarding_cases WHERE customer_id=${customerId} ORDER BY created_at LIMIT 1) c WHERE c.current_status='lost'
     `;
-    if(!own[0]) return NextResponse.json({error:'This merchant is assigned to another CSM.'},{status:403});
+    if(!own[0]&&!(await paytmRequestHolder(sql,'csm',customerId,user.id))) return NextResponse.json({error:'This merchant is assigned to another CSM.'},{status:403});
   }
   const run=await latestCompleteRun(sql);
   const sub=run?await sql`SELECT *,wallet_balance::float8 AS credits,cancelled_at::text AS cancelled_on,expected_renewal_due_date::text AS renewal_due,renewal_date::text AS renewed_on FROM merchant_subscriptions WHERE sync_run_id=${run.id} AND customer_id=${customerId}`:[];

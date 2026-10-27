@@ -5,13 +5,9 @@
 //     subscribed and ad_live_status "Ad live/completed"    -> CSM
 //     subscribed, ads created none live / no ads           -> Onboarding
 //   Cust ID: the sheet's cust_id; when blank, matched from the MID (ads / CT) or the phone.
-//   Owner (never an admin's queue; admins only reassign):
-//     Sales       round robin among the Sales team's agents.
-//     Onboarding  the case owner (also for lost / Not Interested cases), else whoever last logged an
-//                 onboarding call for the merchant, else round robin among onboarding agents.
-//     CSM         the assigned CSM, else the CSM who last called them; else, if onboarding has the
-//                 merchant (e.g. lost before a CSM was assigned), it goes to that case owner in
-//                 Onboarding; else round robin among CSM agents.
+//   Owner: an inbound request has no owner, so it is round robin among that team's agents (fewest
+//   Paytm requests today first). While the request is open, that person can open and log the merchant
+//   even if someone else owns the case (paytmRequestHolder); the case owner does not change.
 //   Repeats (as Lead Gen): a request within 24 hours of the merchant's last one, while
 //   it is still open, is the same request (tapped N×). Otherwise it is a new request tagged "Repeat".
 //   Only requests from the last 48 hours (the sheet's expiry) are brought in.
@@ -89,7 +85,7 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
     if(x.at!.getTime()<cutoff){old++;continue;}
     if((await sql`SELECT 1 FROM paytm_callback_ids WHERE request_id=${x.id}`)[0]){seen++;continue;}
     const r=x.r, mid=s(r.mid), phone=phone10(r.phone_number);
-    let team=callbackTeam(r.subscription_status,r.ad_live_status);
+    const team=callbackTeam(r.subscription_status,r.ad_live_status);
     const custId=String(r.cust_id??'').trim().replace(/\.0$/,'');
     const customerId=await customerFor(sql,/^\d{5,}$/.test(custId)?custId:null,mid,phone);
     const at=x.at!.toISOString();
@@ -105,22 +101,7 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
       await sql`INSERT INTO paytm_callback_ids(request_id,wa_message_id) VALUES(${x.id},${prev.id}) ON CONFLICT DO NOTHING`;
       merged++;continue;
     }
-    let agentId:string|null=null;
-    if(team==='seller') agentId=await nextOf('sales');
-    else{
-      const active=async(rows:any[])=>rows[0]?.id?String(rows[0].id):null;
-      const caseOwner=customerId?await active(await sql`SELECT a.id FROM onboarding_cases c JOIN agents a ON a.id=c.assigned_to AND a.active
-        WHERE c.customer_id=${customerId} ORDER BY c.created_at DESC LIMIT 1`):null;
-      const lastCaller=async(source:string)=>customerId?active(await sql`SELECT a.id FROM onboarding_events e JOIN agents a ON a.id=e.agent_id AND a.active
-        WHERE e.customer_id=${customerId} AND e.source_type=${source} ORDER BY e.event_time DESC LIMIT 1`):null;
-      if(team==='onboarding') agentId=caseOwner||await lastCaller('new_event')||await nextOf('onboarding');
-      else{
-        agentId=(customerId?await active(await sql`SELECT a.id FROM csm_assignments x JOIN agents a ON a.id=x.agent_id AND a.active WHERE x.customer_id=${customerId}`):null)
-          ||await lastCaller('customer_success_followup');
-        if(!agentId&&caseOwner){team='onboarding';agentId=caseOwner;}
-        if(!agentId) agentId=await nextOf('csm');
-      }
-    }
+    const agentId=await nextOf(team==='seller'?'sales':team);
     const repeat=Boolean(prev);
     const ins=await sql`
       INSERT INTO wa_messages(token,template,workspace,customer_id,phone,agent_id,source_ref,dedupe_key,variables,status,status_note,clicked_at,click_count)
@@ -136,4 +117,11 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
     }
   }
   return {created,merged,seen,old};
+}
+
+// The agent holds an open Paytm callback request for this merchant in this workspace.
+export async function paytmRequestHolder(sql:any,workspace:'onboarding'|'csm',customerId:string,agentId:string){
+  const r=await sql`SELECT 1 FROM wa_messages WHERE template=${PAYTM_CALLBACK} AND workspace=${workspace} AND customer_id=${customerId}
+    AND agent_id=${agentId}::uuid AND resolved_at IS NULL LIMIT 1`;
+  return Boolean(r[0]);
 }
