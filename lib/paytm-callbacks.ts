@@ -5,9 +5,11 @@
 //     subscribed and ad_live_status "Ad live/completed"    -> CSM
 //     subscribed, ads created none live / no ads           -> Onboarding
 //   Cust ID: the sheet's cust_id; when blank, matched from the MID (ads / CT) or the phone.
-//   Owner: an inbound request has no owner, so it is round robin among that team's agents (fewest
-//   Paytm requests today first). While the request is open, that person can open and log the merchant
-//   even if someone else owns the case (paytmRequestHolder); the case owner does not change.
+//   Owner first, round robin only when there is none (fewest Paytm requests today first):
+//     Sales       the seller who last logged a disposition for the merchant (Cust ID or phone)
+//     Onboarding  the onboarder who owns the merchant's case
+//     CSM         the merchant's assigned CSM
+//   Whoever holds an open request can open and log that merchant (paytmRequestHolder).
 //   Repeats (as Lead Gen): a request within 24 hours of the merchant's last one, while
 //   it is still open, is the same request (tapped N×). Otherwise it is a new request tagged "Repeat".
 //   A request routed to Onboarding for a lost case reopens it (Reopened: callback requested); the
@@ -71,6 +73,21 @@ async function teamRotation(sql:any,team:'sales'|'onboarding'|'csm'){
   return rows.map((r:any)=>({id:String(r.id),name:r.name,n:Number(r.n),last:r.last?new Date(r.last).getTime():0}));
 }
 
+// The merchant's current owner in that team (active agents only), else null.
+async function ownerOf(sql:any,team:'seller'|'onboarding'|'csm',customerId:string|null,phone:string|null){
+  const one=(r:any[])=>r[0]?.id?String(r[0].id):null;
+  if(team==='seller'){
+    if(!customerId&&!phone) return null;
+    return one(await sql`SELECT a.id FROM calls c JOIN agents a ON a.id=c.agent_id AND a.active
+      WHERE c.source_type='new_call' AND (${customerId?sql`c.customer_id=${customerId}`:sql`FALSE`} OR ${phone?sql`c.phone=${phone}`:sql`FALSE`})
+      ORDER BY c.event_time DESC NULLS LAST LIMIT 1`);
+  }
+  if(!customerId) return null;
+  if(team==='onboarding') return one(await sql`SELECT a.id FROM onboarding_cases c JOIN agents a ON a.id=c.assigned_to AND a.active
+    WHERE c.customer_id=${customerId} ORDER BY c.created_at DESC LIMIT 1`);
+  return one(await sql`SELECT a.id FROM csm_assignments x JOIN agents a ON a.id=x.agent_id AND a.active WHERE x.customer_id=${customerId} LIMIT 1`);
+}
+
 export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
   const cutoff=Date.now()-2*DAY;
   const rows=input.map(r=>({id:s(r.id)?.replace(/\.0$/,'')||null,at:istTime(r.requested_at),r})).filter(x=>x.id&&x.at)
@@ -103,7 +120,7 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
       await sql`INSERT INTO paytm_callback_ids(request_id,wa_message_id) VALUES(${x.id},${prev.id}) ON CONFLICT DO NOTHING`;
       merged++;continue;
     }
-    const agentId=await nextOf(team==='seller'?'sales':team);
+    const agentId=await ownerOf(sql,team,customerId,phone)||await nextOf(team==='seller'?'sales':team);
     const repeat=Boolean(prev);
     const ins=await sql`
       INSERT INTO wa_messages(token,template,workspace,customer_id,phone,agent_id,source_ref,dedupe_key,variables,status,status_note,clicked_at,click_count)
