@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveCallbackRequests } from '@/lib/wa';
 import { db } from '@/lib/db';
+import { paytmRequestHolder } from '@/lib/paytm-callbacks';
 import { currentUserAccess } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
 import { PLANS,isPlanCode,plansRequiredOn,todayIst } from '@/lib/plans';
@@ -34,7 +35,7 @@ export async function POST(req:Request){
       // Onboarding-lost merchants are open to every CSM (low priority); others only to their CSM.
       if(role==='agent'&&c.current_status!=='lost'){
         const own=await tx`SELECT 1 FROM csm_assignments WHERE customer_id=${customerId} AND agent_id=${user.id}::uuid`;
-        if(!own[0]) throw new Error('NOT_ASSIGNED');
+        if(!own[0]&&!(await paytmRequestHolder(tx,'csm',customerId,user.id))) throw new Error('NOT_ASSIGNED');
       }
       const codes=[l0Code,l1Code,l2Code].filter(Boolean) as string[];
       const nodes=await tx`SELECT id,code,label,level,parent_id FROM onboarding_disposition_nodes WHERE code=ANY(${codes}) AND active=TRUE`;

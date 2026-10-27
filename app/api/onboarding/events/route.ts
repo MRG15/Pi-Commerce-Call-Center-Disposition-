@@ -1,6 +1,7 @@
 import { NextResponse,after } from 'next/server';
 import { triggerOnboardingWa,resolveCallbackRequests } from '@/lib/wa';
 import { db } from '@/lib/db';
+import { paytmRequestHolder } from '@/lib/paytm-callbacks';
 import { currentUserAccess,canAccess,canManageAllOnboardingCases } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
 import { PLANS, isPlanCode, plansRequiredOn, todayIst } from '@/lib/plans';
@@ -35,7 +36,7 @@ export async function POST(req:Request){
       const caseRows=await tx`SELECT * FROM onboarding_cases WHERE id=${caseId}::uuid FOR UPDATE`;
       const c:any=caseRows[0];
       if(!c) throw new Error('CASE_NOT_FOUND');
-      if(!canManageAllOnboardingCases(user) && c.assigned_to!==user.id) throw new Error('NOT_ASSIGNED');
+      if(!canManageAllOnboardingCases(user) && c.assigned_to!==user.id && !(await paytmRequestHolder(tx,'onboarding',c.customer_id,user.id))) throw new Error('NOT_ASSIGNED');
 
       const attemptRows=await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${caseId}::uuid`;
       const attempt=Number(attemptRows[0]?.n||1);

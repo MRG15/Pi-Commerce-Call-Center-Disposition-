@@ -1,6 +1,6 @@
 'use client';
 import UpgradePicker from './UpgradePicker';
-import CallbackRequestList,{useCallbackRequests,refreshCallbackRequests} from './CallbackRequests';
+import CallbackRequestList,{useCallbackRequests,refreshCallbackRequests,NewCallbackPill,reqCbGlow} from './CallbackRequests';
 import { useEffect,useMemo,useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLANS,plansRequiredOn,todayIst } from '@/lib/plans';
@@ -100,7 +100,7 @@ export default function CsmConsole(){
   if(loading||!user)return <div className="center">Loading CSM workspace…</div>;
   const nav:[View,string][]=[['queues','Queues'],['callbacks',`Callbacks${dueCallbacks?` (${dueCallbacks})`:''}`],['reqcb',`Req Call Back${reqCb.length?` (${reqCb.length})`:''}`],['metrics','Daily Metrics'],...(admin?[['notes','Pitch Notes'],['allocation','Allocation']] as [View,string][]:[])];
 
-  return <div className="app-shell">
+  return <div className="app-shell"><NewCallbackPill rows={reqCb} onOpen={(r:any)=>{setView('reqcb');if(r.customer_id)openMerchant(r.customer_id);}} onView={()=>setView('reqcb')}/>
     <header><div><strong>Pi Commerce</strong><span> · CSM Workspace</span></div><div className="header-actions">
       {(user.isSuperAdmin||user.access?.seller)&&<a href="/">Seller Workspace</a>}
       {(user.isSuperAdmin||user.access?.onboarding)&&<a href="/onboarding">Onboarding Workspace</a>}
@@ -108,7 +108,7 @@ export default function CsmConsole(){
       <span className="badge">{user.name}{admin?' · CSM Admin':''}</span><button className="linkbtn" onClick={logout}>Logout</button>
     </div></header>
     <div className="seller-shell">
-      <nav className="side-nav">{nav.map(([k,l])=><button key={k} className={view===k?'active':''} onClick={()=>setView(k)}>{l}</button>)}</nav>
+      <nav className="side-nav">{nav.map(([k,l])=><button key={k} className={[view===k?'active':'',k==='reqcb'?reqCbGlow(reqCb):''].join(' ').trim()} onClick={()=>setView(k)}>{l}</button>)}</nav>
       <main className="leads-main">
         {error&&<div className="error card">{error}</div>}
         {view==='reqcb'&&<CallbackRequestList rows={reqCb} showOwner={admin} onOpen={(r:any)=>openMerchant(r.customer_id)}/>}
