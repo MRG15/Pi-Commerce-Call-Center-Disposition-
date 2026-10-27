@@ -23,7 +23,7 @@ type CaseSort='credits'|'subscribed'|'stage';
 const CASE_SORTS:[CaseSort,string][]=[['stage','Stage reached'],['subscribed','Subscribed date'],['credits','Credits pending']];
 // Stages without a set order sort below the ordered ones.
 const caseSortValue=(c:any,k:CaseSort):number|null=>k==='credits'?(c.sub_credits??null):k==='subscribed'?(c.sale_date?new Date(String(c.sale_date).slice(0,10)).getTime():null):(c.stage_rank??(c.last_completed_stage?0:null));
-const REOPEN_LABEL:any={no_ad_ran:'Reopened: no ad ran',ad_failed:'Reopened: ad failed'};
+const REOPEN_LABEL:any={no_ad_ran:'Reopened: no ad ran',ad_failed:'Reopened: ad failed',callback_requested:'Reopened: callback requested'};
 const ONBOARDING_CSV:CsvColumn<any>[]=[
  ['Cust ID',c=>c.customer_id],['Merchant',c=>c.merchant_name],['Phone',c=>c.phone_number],['Category',c=>[c.category,c.sub_category].filter(Boolean).join(' / ')],
  ['Assigned to',c=>c.assigned_name],['Status',c=>c.current_status==='ads_live'?'Ads Live':c.current_status],['L0',c=>c.current_l0],['L1',c=>c.current_l1],['L2',c=>c.current_l2],

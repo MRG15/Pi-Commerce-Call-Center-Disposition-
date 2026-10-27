@@ -10,6 +10,8 @@
 //   even if someone else owns the case (paytmRequestHolder); the case owner does not change.
 //   Repeats (as Lead Gen): a request within 24 hours of the merchant's last one, while
 //   it is still open, is the same request (tapped N×). Otherwise it is a new request tagged "Repeat".
+//   A request routed to Onboarding for a lost case reopens it (Reopened: callback requested); the
+//   owner stays, and the round-robin holder can log it.
 //   Only requests from the last 48 hours (the sheet's expiry) are brought in.
 import { randomBytes } from 'crypto';
 
@@ -73,7 +75,7 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
   const cutoff=Date.now()-2*DAY;
   const rows=input.map(r=>({id:s(r.id)?.replace(/\.0$/,'')||null,at:istTime(r.requested_at),r})).filter(x=>x.id&&x.at)
     .sort((a,b)=>a.at!.getTime()-b.at!.getTime());
-  let created=0,merged=0,seen=0,old=0;
+  let created=0,merged=0,seen=0,old=0,reopened=0;
   const rotations:Record<string,any[]>={};
   const nextOf=async(team:'sales'|'onboarding'|'csm')=>{
     const list=rotations[team]??=await teamRotation(sql,team);
@@ -114,9 +116,10 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
       if(prev&&!prev.resolved_at) await sql`UPDATE wa_messages SET resolved_at=now() WHERE id=${prev.id}`;
       await sql`INSERT INTO paytm_callback_ids(request_id,wa_message_id) VALUES(${x.id},${ins[0].id}) ON CONFLICT DO NOTHING`;
       created++;
+      if(team==='onboarding'&&customerId&&await reopenLostCase(sql,customerId,x.id!,info.stage)) reopened++;
     }
   }
-  return {created,merged,seen,old};
+  return {created,merged,seen,old,reopened};
 }
 
 // The agent holds an open Paytm callback request for this merchant in this workspace.
@@ -124,4 +127,20 @@ export async function paytmRequestHolder(sql:any,workspace:'onboarding'|'csm',cu
   const r=await sql`SELECT 1 FROM wa_messages WHERE template=${PAYTM_CALLBACK} AND workspace=${workspace} AND customer_id=${customerId}
     AND agent_id=${agentId}::uuid AND resolved_at IS NULL LIMIT 1`;
   return Boolean(r[0]);
+}
+
+async function reopenLostCase(sql:any,customerId:string,requestId:string,stage:string){
+  return sql.begin(async(tx:any)=>{
+    const c=(await tx`SELECT id FROM onboarding_cases WHERE customer_id=${customerId} ORDER BY created_at DESC LIMIT 1 FOR UPDATE`)[0];
+    if(!c) return false;
+    const upd=await tx`UPDATE onboarding_cases SET current_status='open',current_l0='Callback Requested',current_l1=NULL,current_l2=NULL,
+        closed_at=NULL,next_callback_at=now(),last_activity_at=now(),updated_at=now(),reopened_at=now(),reopen_reason='callback_requested'
+      WHERE id=${c.id} AND current_status='lost' RETURNING id`;
+    if(!upd[0]) return false;
+    const n=(await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${c.id}`)[0].n;
+    await tx`INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_name_raw,source_type,l0_code,l0_label_snapshot,remark)
+      VALUES(${c.id},${customerId},${n},'Paytm callback request','system','SYSTEM_CALLBACK_REOPENED','Reopened: callback requested',
+        ${`Merchant asked for a callback on Paytm${stage?` (${stage.replace(/_/g,' ')})`:''}, request ${requestId}. Lost case reopened.`})`;
+    return true;
+  });
 }
