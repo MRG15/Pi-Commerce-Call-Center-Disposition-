@@ -4,6 +4,7 @@
 //     subscription_status "Not subscribed"                 -> Sales
 //     subscribed and ad_live_status "Ad live/completed"    -> CSM
 //     subscribed, ads created none live / no ads           -> Onboarding
+//   Cust ID: the sheet's cust_id; when blank, matched from the MID (ads / CT) or the phone.
 //   Owner: Sales is round robin among the Sales team's agents. Onboarding goes to the case owner and
 //   CSM to the assigned CSM (the callback-requests pane already routes by owner); with no owner it
 //   shows to the workspace admins.
@@ -16,7 +17,7 @@ export const PAYTM_CALLBACK='PAYTM_CALLBACK';
 const DAY=86400000;
 const s=(v:unknown)=>{const t=String(v??'').trim();return t||null;};
 
-export type PaytmCallbackRow={id?:unknown;mid?:unknown;business_name?:unknown;phone_number?:unknown;requested_at?:unknown;stage?:unknown;reason?:unknown;
+export type PaytmCallbackRow={cust_id?:unknown;id?:unknown;mid?:unknown;business_name?:unknown;phone_number?:unknown;requested_at?:unknown;stage?:unknown;reason?:unknown;
   subscription_status?:unknown;ad_live_status?:unknown;onboarding_stage?:unknown};
 
 export function callbackTeam(sub:unknown,ad:unknown):'seller'|'onboarding'|'csm'{
@@ -33,7 +34,8 @@ function istTime(v:unknown){
 }
 const phone10=(v:unknown)=>{const d=String(v??'').replace(/\.0$/,'').replace(/\D/g,'');return d.length>=10?d.slice(-10):null;};
 
-async function customerFor(sql:any,mid:string|null,phone:string|null){
+async function customerFor(sql:any,custId:string|null,mid:string|null,phone:string|null){
+  if(custId) return custId;
   if(mid){
     const a=await sql`SELECT customer_id FROM merchant_ads WHERE mid=${mid} AND customer_id IS NOT NULL LIMIT 1`;
     if(a[0]) return String(a[0].customer_id);
@@ -77,7 +79,8 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
     if((await sql`SELECT 1 FROM paytm_callback_ids WHERE request_id=${x.id}`)[0]){seen++;continue;}
     const r=x.r, mid=s(r.mid), phone=phone10(r.phone_number);
     const team=callbackTeam(r.subscription_status,r.ad_live_status);
-    const customerId=await customerFor(sql,mid,phone);
+    const custId=String(r.cust_id??'').trim().replace(/\.0$/,'');
+    const customerId=await customerFor(sql,/^\d{5,}$/.test(custId)?custId:null,mid,phone);
     const at=x.at!.toISOString();
     const info={request_id:x.id,mid:mid||'',business_name:s(r.business_name)||'',stage:s(r.stage)||'',reason:s(r.reason)||'',
       subscription_status:s(r.subscription_status)||'',ad_live_status:s(r.ad_live_status)||'',onboarding_stage:s(r.onboarding_stage)||''};
