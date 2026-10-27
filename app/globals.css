@@ -76,6 +76,15 @@
 .stale-list button:hover{background:#f5f7fb}
 .stale-list span{color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stale-list em{font-style:normal;color:#b42318;font-size:12px}
+.cb-alert{top:112px}
+.cb-alert .stale-pill{border-color:#b9d4ff;color:#0b3a8a}
+.cb-alert .stale-pill b,.cb-alert .stale-list em{color:#0b5cd5}
+.cb-alert .stale-dot{background:#0b5cd5;box-shadow:0 0 0 3px rgba(11,92,213,.18);animation:cbpulse 1.6s ease-in-out infinite}
+@keyframes cbpulse{50%{box-shadow:0 0 0 6px rgba(11,92,213,.05)}}
+.reqcb-glow{box-shadow:0 0 0 2px rgba(11,92,213,.35);animation:cbglow 1.6s ease-in-out infinite;border-radius:8px}
+@keyframes cbglow{50%{box-shadow:0 0 0 5px rgba(11,92,213,.08)}}
+.req-cb-tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:#eef4ff;color:#0b3a8a;font-size:11px;font-style:normal;font-weight:500;vertical-align:middle}
+.req-cb-tag.repeat{background:#fff4e5;color:#93370d}
 /* Incentives tab: "How Incentives Work" plan cards. */
 .plan-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
 .plan-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:#fbfcfe}
