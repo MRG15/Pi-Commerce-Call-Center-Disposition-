@@ -37,9 +37,11 @@ export async function GET(req:Request){
       FROM wa_messages m
       -- Voice AI handoffs and Paytm callback requests with no matching case still show (to admins) as unmatched.
       LEFT JOIN LATERAL (SELECT id,assigned_to FROM onboarding_cases WHERE customer_id=m.customer_id ORDER BY created_at LIMIT 1) oc ON TRUE
-      LEFT JOIN merchant_information mi ON mi.customer_id=m.customer_id LEFT JOIN customers cu ON cu.customer_id=m.customer_id LEFT JOIN agents a ON a.id=oc.assigned_to
+      LEFT JOIN merchant_information mi ON mi.customer_id=m.customer_id LEFT JOIN customers cu ON cu.customer_id=m.customer_id
+      LEFT JOIN agents a ON a.id=CASE WHEN m.template='PAYTM_CALLBACK' THEN m.agent_id ELSE oc.assigned_to END
       WHERE m.workspace='onboarding' AND m.clicked_at IS NOT NULL AND m.resolved_at IS NULL AND (oc.id IS NOT NULL OR m.template IN ('VOICE_AI_HANDOFF','PAYTM_CALLBACK'))
-        AND (${all} OR oc.assigned_to=${user.id}::uuid)
+        -- Paytm callback requests go to the person picked at sync time (case owner / last caller / rotation).
+        AND (${all} OR (CASE WHEN m.template='PAYTM_CALLBACK' THEN m.agent_id ELSE oc.assigned_to END)=${user.id}::uuid)
       ORDER BY m.clicked_at DESC LIMIT 100
     `;
     return NextResponse.json({requests:rows});
@@ -52,8 +54,10 @@ export async function GET(req:Request){
       SELECT m.id,m.customer_id,m.phone,m.template,m.clicked_at,m.click_count,COALESCE(mi.merchant_name,cu.merchant_name,m.variables->>'business_name') AS merchant_name,a.name AS owner,
         m.variables->>'stage' AS stage,m.variables->>'reason' AS reason,m.variables->>'repeat' AS repeat
       FROM wa_messages m LEFT JOIN csm_assignments ca ON ca.customer_id=m.customer_id
-      LEFT JOIN merchant_information mi ON mi.customer_id=m.customer_id LEFT JOIN customers cu ON cu.customer_id=m.customer_id LEFT JOIN agents a ON a.id=ca.agent_id
-      WHERE m.workspace='csm' AND m.clicked_at IS NOT NULL AND m.resolved_at IS NULL AND (${all} OR ca.agent_id=${user.id}::uuid)
+      LEFT JOIN merchant_information mi ON mi.customer_id=m.customer_id LEFT JOIN customers cu ON cu.customer_id=m.customer_id
+      LEFT JOIN agents a ON a.id=CASE WHEN m.template='PAYTM_CALLBACK' THEN m.agent_id ELSE ca.agent_id END
+      WHERE m.workspace='csm' AND m.clicked_at IS NOT NULL AND m.resolved_at IS NULL
+        AND (${all} OR (CASE WHEN m.template='PAYTM_CALLBACK' THEN m.agent_id ELSE ca.agent_id END)=${user.id}::uuid)
       ORDER BY m.clicked_at DESC LIMIT 100
     `;
     return NextResponse.json({requests:rows});
