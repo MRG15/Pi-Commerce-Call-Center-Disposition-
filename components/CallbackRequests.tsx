@@ -7,7 +7,7 @@ import { useEffect,useState } from 'react';
 // The hook keeps the list fresh while the workspace is open (every 15 seconds while the window is in use,
 // on returning to it, and right after a disposition is saved); a request clears once a new disposition is logged for the merchant.
 const TEMPLATE_LABEL:Record<string,string>={SELLER_NOT_CONNECTED:'Not connected nudge',ONB_NOT_CONNECTED:'Not connected nudge',T1_RENEW:'Renewal nudge',
-  T2_ENDED_FREE:'Ads ended',T3_ENDED_TOPUP:'Ads ended · top-up',T4_ENDING_FREE:'Ads ending',T5_ENDING_TOPUP:'Ads ending · top-up',VOICE_AI_HANDOFF:'Voice AI handoff',WB_OPTICAL:'Win-back testimonial',WB_SPA:'Win-back testimonial',WB_GENERIC:'Win-back testimonial',PAYTM_CALLBACK:'Paytm callback request'};
+  T2_ENDED_FREE:'Ads ended',T3_ENDED_TOPUP:'Ads ended · top-up',T4_ENDING_FREE:'Ads ending',T5_ENDING_TOPUP:'Ads ending · top-up',VOICE_AI_HANDOFF:'Voice AI handoff',WB_OPTICAL:'Win-back testimonial',WB_SPA:'Win-back testimonial',WB_GENERIC:'Win-back testimonial',PAYTM_CALLBACK:'Paytm callback request',REFUND_NOTICE:'Refund WhatsApp · wants ad setup'};
 const STAGE_LABEL:Record<string,string>={settings:'Settings page',connect_facebook:'Connect Facebook',subscribe:'Subscribe page',buy_credits:'Buy credits',other:'Other page'};
 const human=(v:string)=>v.replace(/_/g,' ').replace(/^\w/,c=>c.toUpperCase());
 export const stageLabel=(v?:string|null)=>v?(STAGE_LABEL[v]||human(v)):'';

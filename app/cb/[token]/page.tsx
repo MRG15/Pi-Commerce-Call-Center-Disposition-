@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { reopenForCallback } from '@/lib/paytm-callbacks';
 
 // "Request a callback" link from the WhatsApp templates (/cb/<callback_token>). Public: the
 // merchant opens it from WhatsApp. Records the request for the workspace's Req Call Back pane;
@@ -14,9 +15,13 @@ export default async function CallbackRequestPage({params}:{params:Promise<{toke
         UPDATE wa_messages
         SET clicked_at=CASE WHEN clicked_at IS NULL OR resolved_at IS NOT NULL THEN now() ELSE clicked_at END,
             resolved_at=NULL,click_count=click_count+1
-        WHERE token=${token} RETURNING id
+        WHERE token=${token} RETURNING id,template,customer_id
       `;
       ok=rows.length>0;
+      // Get ad setup on the refund message: the merchant wants to continue, so their lost case reopens.
+      if(rows[0]?.template==='REFUND_NOTICE'&&rows[0].customer_id)
+        await reopenForCallback(db(),String(rows[0].customer_id),'refund_callback','Refund WhatsApp',
+          'Merchant tapped Get ad setup on the refund WhatsApp. Lost case reopened for the owner.');
     }catch{ok=false;}
   }
   return <div style={{minHeight:'100vh',display:'grid',placeItems:'center',background:'#f5f7fb',padding:20,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif'}}>

@@ -1,8 +1,8 @@
 import { NextResponse,after } from 'next/server';
-import { triggerOnboardingWa,resolveCallbackRequests } from '@/lib/wa';
+import { triggerOnboardingWa,triggerRefundWa,resolveCallbackRequests } from '@/lib/wa';
 import { db } from '@/lib/db';
 import { paytmRequestHolder } from '@/lib/paytm-callbacks';
-import { currentUserAccess,canAccess,canManageAllOnboardingCases } from '@/lib/workspace-access';
+import { currentUserAccess,canAccess,canManageAllOnboardingCases,isWorkspaceAdmin } from '@/lib/workspace-access';
 import { toIstCallback } from '@/lib/onboarding';
 import { PLANS, isPlanCode, plansRequiredOn, todayIst } from '@/lib/plans';
 import { resolveUpgrade,UPGRADE_ERRORS } from '@/lib/plan-upgrade';
@@ -21,6 +21,12 @@ export async function POST(req:Request){
   const rawTopUp=body.topUpAmount;
   const topUpAmount=rawTopUp===null||rawTopUp===undefined||String(rawTopUp).trim()===''?null:Number(rawTopUp);
   if(topUpAmount!==null&&(!Number.isFinite(topUpAmount)||topUpAmount<0)) return NextResponse.json({error:'Top-up amount must be zero or more.'},{status:400});
+  const refundAmount=l0Code==='OB_REFUND_PROCESSED'?Number(body.refundAmount):null;
+  if(l0Code==='OB_REFUND_PROCESSED'){
+    if(!isWorkspaceAdmin(user,'onboarding')) return NextResponse.json({error:'Only onboarding admins can log a refund.'},{status:403});
+    if(!Number.isFinite(refundAmount)||refundAmount!<=0) return NextResponse.json({error:'Enter the refund amount.'},{status:400});
+  }
+  let refundCustomer:string|null=null;
   const planCodeRaw=body.planCode?String(body.planCode):null;
   if(planCodeRaw&&!isPlanCode(planCodeRaw)) return NextResponse.json({error:'Invalid plan.'},{status:400});
   // Subscription Renewed records the plan sold from 1 Oct 2026.
@@ -82,6 +88,19 @@ export async function POST(req:Request){
         return;
       }
 
+      // Refunded (no contact): recorded on an open or closed case without changing its status; the
+      // refund WhatsApp goes out after the save.
+      if(l0Code==='OB_REFUND_PROCESSED'){
+        if(l1Code||l2Code) throw new Error('BAD_TAXONOMY');
+        await tx`
+          INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l0_label_snapshot,remark,refund_amount_inr)
+          VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'system',${l0Code},${l0.label},${remark},${refundAmount})
+        `;
+        await tx`UPDATE onboarding_cases SET updated_at=now() WHERE id=${caseId}::uuid`;
+        refundCustomer=c.customer_id;
+        return;
+      }
+
       // Plan Upgraded can be logged before or after Ads Live. It is recorded on the case's timeline
       // without changing its onboarding status; the upgrade value counts like a top-up.
       if(l0Code==='OB_PLAN_UPGRADED'){
@@ -134,11 +153,13 @@ export async function POST(req:Request){
         await tx`UPDATE technical_cases SET status='resolved',resolved_by=${user.id}::uuid,resolved_at=now(),latest_remark=COALESCE(${remark},latest_remark),updated_at=now() WHERE id=${resolveTechId}::uuid AND onboarding_case_id=${caseId}::uuid AND status='open'`;
       }
     });
-    try{const cs=await sql`SELECT customer_id FROM onboarding_cases WHERE id=${caseId}::uuid`;if(cs[0]) await resolveCallbackRequests(sql,'onboarding',cs[0].customer_id);}
+    // A refund is an admin record, not a call: open callback requests stay.
+    try{const cs=await sql`SELECT customer_id FROM onboarding_cases WHERE id=${caseId}::uuid`;if(cs[0]&&l0Code!=='OB_REFUND_PROCESSED') await resolveCallbackRequests(sql,'onboarding',cs[0].customer_id);}
     catch(e){console.error('onboarding callback resolve error',e);}
     after(async()=>{
       try{
         if(l0Code==='OB_NOT_CONNECTED') await triggerOnboardingWa(sql,caseId,String(user.id),`case:${caseId}`);
+        if(refundCustomer&&refundAmount) await triggerRefundWa(sql,refundCustomer,String(user.id),`refund:${caseId}:${Date.now()}`,refundAmount);
       }catch(e){console.error('onboarding whatsapp error',e);}
     });
     return NextResponse.json({ok:true});
