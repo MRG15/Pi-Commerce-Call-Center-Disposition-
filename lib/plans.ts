@@ -39,7 +39,7 @@ export function phoneKey(v: unknown) {
 // only its renewal price, so upgrades are always valued from ₹799).
 export type CurrentPlan = 'legacy' | PlanCode;
 export const PLAN_RANK: Record<CurrentPlan, number> = { legacy: 0, silver: 1, gold: 2, platinum: 3 };
-// The ₹799 plan renews at ₹499 from day 30 of the subscription; Silver, Gold and Platinum renew at
+// The ₹799 plan renews at ₹499 on day 30 of the subscription (the purchase day is day 1); Silver, Gold and Platinum renew at
 // their own price.
 export const LEGACY_RENEWAL_PRICE = 499;
 export const RENEWAL_DAY = 30;
@@ -58,11 +58,12 @@ export function upgradeTargets(from: CurrentPlan): PlanCode[] {
 export function upgradeValue(from: CurrentPlan, to: PlanCode, renewed = false) {
   return Math.max(0, PLANS[to].price - planPrice(from, renewed));
 }
-// Whether `on` is on or after the first renewal (day 30) of a subscription bought on `subscribed`.
+// Whether `on` is on or after the first renewal of a subscription bought on `subscribed`. The
+// purchase day is day 1 and the renewal is charged on day 30 (bought 1 Oct → renewed 30 Oct).
 export function isRenewed(subscribed: string | null | undefined, on: string) {
   if (!subscribed) return false;
   const days = (new Date(on + 'T00:00:00Z').getTime() - new Date(String(subscribed).slice(0, 10) + 'T00:00:00Z').getTime()) / 86400000;
-  return days >= RENEWAL_DAY;
+  return days + 1 >= RENEWAL_DAY;
 }
 // Sub Raw plan name → plan ("₹799 Plan" / "₹499 Plan" → legacy).
 export function planFromName(name: unknown): CurrentPlan | null {
