@@ -9,7 +9,7 @@
  *      every 3 hours. Run syncPaytmCallbacks any time to push the latest requests.
  *
  * Reads, by header name: cust_id, id, mid, business_name, phone_number, requested_at, stage, reason,
- * subscription_status, ad_live_status, onboarding_stage. The portal only brings in requests from the
+ * subscription_status, ad_live_status, onboarding_stage, route_to (the team: Sales / Onboarding / CSM). The portal only brings in requests from the
  * last 48 hours and handles each id once, so re-running is safe.
  */
 const PCB_SHEET = 'Callbacks';
@@ -32,7 +32,7 @@ function syncPaytmCallbacks() {
   if (!sheet) throw new Error('Tab "' + PCB_SHEET + '" not found');
   const values = sheet.getDataRange().getDisplayValues();
   const header = values[0].map(h => String(h).trim().toLowerCase().replace(/[\s-]+/g, '_'));
-  const fields = ['cust_id', 'id', 'mid', 'business_name', 'phone_number', 'requested_at', 'stage', 'reason', 'subscription_status', 'ad_live_status', 'onboarding_stage'];
+  const fields = ['cust_id', 'id', 'mid', 'business_name', 'phone_number', 'requested_at', 'stage', 'reason', 'subscription_status', 'ad_live_status', 'onboarding_stage', 'route_to'];
   const idx = {};
   fields.forEach(f => { idx[f] = header.indexOf(f); });
   ['id', 'phone_number', 'requested_at', 'subscription_status', 'ad_live_status'].forEach(f => {

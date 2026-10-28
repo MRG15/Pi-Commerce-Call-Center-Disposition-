@@ -1,6 +1,6 @@
 // Paytm callback requests: merchants who asked for a callback on a Paytm workflow page (Merchant
 // Callback Request sheet, "Callbacks" tab, synced every 3 hours by scripts/paytm-callback-sync.gs).
-//   Team (from the sheet's status columns):
+//   Team: the sheet's route_to column (W); when blank, from the status columns:
 //     subscription_status "Not subscribed"                 -> Sales
 //     subscribed and ad_live_status "Ad live/completed"    -> CSM
 //     subscribed, ads created none live / no ads           -> Onboarding
@@ -21,9 +21,14 @@ export const PAYTM_CALLBACK='PAYTM_CALLBACK';
 const DAY=86400000;
 const s=(v:unknown)=>{const t=String(v??'').trim();return t||null;};
 
-export type PaytmCallbackRow={cust_id?:unknown;id?:unknown;mid?:unknown;business_name?:unknown;phone_number?:unknown;requested_at?:unknown;stage?:unknown;reason?:unknown;
+export type PaytmCallbackRow={route_to?:unknown;cust_id?:unknown;id?:unknown;mid?:unknown;business_name?:unknown;phone_number?:unknown;requested_at?:unknown;stage?:unknown;reason?:unknown;
   subscription_status?:unknown;ad_live_status?:unknown;onboarding_stage?:unknown};
 
+// The sheet's route_to column (Sales / Onboarding / CSM) decides; blank falls back to the status rule.
+export function routeTo(v:unknown):'seller'|'onboarding'|'csm'|null{
+  const t=String(v??'').trim().toLowerCase();
+  return t==='sales'?'seller':t==='onboarding'?'onboarding':t==='csm'?'csm':null;
+}
 export function callbackTeam(sub:unknown,ad:unknown):'seller'|'onboarding'|'csm'{
   if(/not\s*subscribed/i.test(String(sub||''))) return 'seller';
   return /live\s*\/\s*completed/i.test(String(ad||''))?'csm':'onboarding';
@@ -104,7 +109,7 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
     if(x.at!.getTime()<cutoff){old++;continue;}
     if((await sql`SELECT 1 FROM paytm_callback_ids WHERE request_id=${x.id}`)[0]){seen++;continue;}
     const r=x.r, mid=s(r.mid), phone=phone10(r.phone_number);
-    const team=callbackTeam(r.subscription_status,r.ad_live_status);
+    const team=routeTo(r.route_to)||callbackTeam(r.subscription_status,r.ad_live_status);
     const custId=String(r.cust_id??'').trim().replace(/\.0$/,'');
     const customerId=await customerFor(sql,/^\d{5,}$/.test(custId)?custId:null,mid,phone);
     const at=x.at!.toISOString();
