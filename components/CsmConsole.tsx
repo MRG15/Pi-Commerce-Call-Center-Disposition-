@@ -13,7 +13,7 @@ type Node={id:string;code:string;label:string;level:number;parent_id:string|null
 type View='queues'|'callbacks'|'reqcb'|'metrics'|'notes'|'allocation';
 type Tab='ending'|'ended'|'cx'|'closed'|'onb_lost'|'all';
 type CxSub=''|'cancelled'|'lapsed';
-type SortBy='impressions'|'spend'|'credits';
+type SortBy='impressions'|'conversations'|'spend'|'credits';
 type CallFilter=''|'never'|'not_connected'|'connected';
 // never = no CSM call yet; not_connected = called but never got through; connected = got through at least once.
 const callStateOf=(m:any):CallFilter=>!m.last_outreach?'never':m.last_connect?'connected':'not_connected';
@@ -32,7 +32,7 @@ const CSM_CSV:CsvColumn<any>[]=[
   ['Cust ID',m=>m.customer_id],['Merchant',m=>m.merchant_name],['Phone',m=>m.phone_number],['CSM',m=>m.queue==='onb_lost'?'':m.assigned_name],
   ['Bucket',m=>QUEUE_LABEL[m.closed?'closed':m.queue]],['Subscription status',m=>m.sub_status],['Cancelled on',m=>m.cancelled_at],
   ['Renewal due',m=>m.renewal_due],['Renewed on',m=>m.renewal_date],['Credits',m=>m.credits],['Ads run',m=>m.total_ads||m.completed_ads_count],
-  ['Ads running',m=>m.active_ads],['Ad end date',m=>m.end_date],['Impressions',m=>m.impressions],['Spend',m=>m.spend],['Clicks',m=>m.clicks],
+  ['Ads running',m=>m.active_ads],['Ad end date',m=>m.end_date],['Impressions',m=>m.impressions],['Conversations',m=>m.conversations],['Spend',m=>m.spend],['Clicks',m=>m.clicks],
   ['Call status',m=>({never:'Never called',not_connected:'Called, not connected',connected:'Connected'} as any)[callStateOf(m)]],['CSM calls',m=>m.cs_calls],
   ['Last call',m=>m.last_outreach?new Date(m.last_outreach).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):''],
   ['Last outcome',m=>disp(m.last_l0,m.last_l1,m.last_l2)],['Last remark',m=>m.last_remark],['Last called by',m=>m.last_by],
@@ -40,7 +40,7 @@ const CSM_CSV:CsvColumn<any>[]=[
   ['Top-ups',m=>m.topups],['Top-up total',m=>m.topup_total],['Renewals',m=>m.renewals],['Pitch note',m=>m.pitch],
   ['Onboarded by',m=>m.onboarding_owner],['Onboarding lost reason',m=>m.lost_reason],['Lost on',m=>m.lost_at?String(m.lost_at).slice(0,10):''],
 ];
-const SORTS:[SortBy,string][]=[['impressions','Impressions'],['spend','Spend'],['credits','Credits']];
+const SORTS:[SortBy,string][]=[['impressions','Impressions'],['conversations','Conversations'],['spend','Spend'],['credits','Credits']];
 const SOURCE_LABEL:any={customer_success_followup:'CSM',new_event:'Onboarding',historical_import:'Imported',assignment:'Assignment',system:'System'};
 
 export default function CsmConsole(){
@@ -165,7 +165,7 @@ function MerchantList({rows,selectedId,onOpen,admin,callbacks}:{rows:any[];selec
         {m.queue==='lapsed'&&<em className="tag-warn">{m.renewal_due?`Renewal due ${fmtDay(m.renewal_due)}${daysSince(m.renewal_due)!==null&&daysSince(m.renewal_due)!>=0?` (${daysSince(m.renewal_due)}d ago)`:''}`:'Renewal date not in sheet'}</em>}
         {m.queue==='onb_lost'&&<><em className="tag-warn">Lost {fmtDay(m.lost_at)}</em>{m.lost_reason&&<em>{m.lost_reason}</em>}{m.onboarding_owner&&<em>Onboarder {m.onboarding_owner}</em>}</>}
         {m.credits!=null&&<em>Credits {money(m.credits)}</em>}
-        {m.queue!=='onb_lost'&&<><em>{num(m.impressions)} impr.</em><em>Spend {money(m.spend)}</em><em>{num(m.clicks)} clicks</em></>}
+        {m.queue!=='onb_lost'&&<><em>{num(m.impressions)} impr.</em>{m.conversations!=null&&<em>{num(m.conversations)} chats</em>}<em>Spend {money(m.spend)}</em><em>{num(m.clicks)} clicks</em></>}
         <em>{m.last_outreach?`Called ${since===0?'today':since+'d ago'}`:'Never called'}</em>
         {m.last_l0&&<em>{m.last_l0}</em>}
         {m.topups>0&&<em>Top-ups {money(m.topup_total)}</em>}

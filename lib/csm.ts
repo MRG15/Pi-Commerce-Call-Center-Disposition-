@@ -89,7 +89,7 @@ export async function csmMerchants(sql:any,runId:number){
     )
     SELECT b.*,
       sel.creative_name,sel.description,sel.ad_status,sel.budget::float8 AS budget,sel.start_date::text AS start_date,sel.end_date::text AS end_date,
-      sel.impressions::float8 AS impressions,sel.clicks::float8 AS clicks,sel.ctr::float8 AS ctr,sel.reach::float8 AS reach,sel.spend::float8 AS spend,
+      sel.impressions::float8 AS impressions,COALESCE(cv.by_id,cv.by_name) AS conversations,sel.clicks::float8 AS clicks,sel.ctr::float8 AS ctr,sel.reach::float8 AS reach,sel.spend::float8 AS spend,
       asg.agent_id AS assigned_to,ag.name AS assigned_name,
       p.note AS pitch,p.note_date AS pitch_date,p.author_name AS pitch_by,
       sr.note AS sheet_remark,sr.note_date AS sheet_remark_date,
@@ -110,6 +110,11 @@ export async function csmMerchants(sql:any,runId:number){
         x.source_row
       LIMIT 1
     ) sel ON TRUE
+    -- Conversations for the ad shown: by Ads ID, else by Cust ID + creative name (as the merchant view).
+    LEFT JOIN LATERAL (
+      SELECT (SELECT sum(x.conversions)::float8 FROM ad_conversions x WHERE sel.ad_id IS NOT NULL AND x.ad_id=sel.ad_id) AS by_id,
+        (SELECT sum(x.conversions)::float8 FROM ad_conversions x WHERE x.customer_id=b.customer_id AND lower(btrim(x.ad_name))=lower(btrim(sel.creative_name))) AS by_name
+    ) cv ON TRUE
     LEFT JOIN csm_assignments asg ON asg.customer_id=b.customer_id
     LEFT JOIN agents ag ON ag.id=asg.agent_id
     LEFT JOIN pitch p ON p.customer_id=b.customer_id
@@ -120,7 +125,7 @@ export async function csmMerchants(sql:any,runId:number){
   `;
 }
 
-// Default order inside each queue. The CSM screen can re-sort by impressions, spend or credits.
+// Default order inside each queue. The CSM screen can re-sort by impressions, conversations, spend or credits.
 //   cancelled — most credits first
 //   lapsed    — most recently due for renewal first (yesterday, D-2, ...), then most credits
 //   ending    — most impressions, then most spend
