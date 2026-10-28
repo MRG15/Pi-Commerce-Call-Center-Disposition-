@@ -39,8 +39,11 @@ export function phoneKey(v: unknown) {
 // only its renewal price, so upgrades are always valued from ₹799).
 export type CurrentPlan = 'legacy' | PlanCode;
 export const PLAN_RANK: Record<CurrentPlan, number> = { legacy: 0, silver: 1, gold: 2, platinum: 3 };
-export function planPrice(p: CurrentPlan) {
-  return p === 'legacy' ? LEGACY_SALE_PRICE : PLANS[p].price;
+// The ₹799 plan renews at ₹499 from its first renewal (same date next month); Silver, Gold and Platinum renew at
+// their own price.
+export const LEGACY_RENEWAL_PRICE = 499;
+export function planPrice(p: CurrentPlan, renewed = false) {
+  return p === 'legacy' ? (renewed ? LEGACY_RENEWAL_PRICE : LEGACY_SALE_PRICE) : PLANS[p].price;
 }
 export function planLabel(p: CurrentPlan) {
   return p === 'legacy' ? `₹${LEGACY_SALE_PRICE} plan` : PLANS[p].label;
@@ -49,9 +52,22 @@ export function planLabel(p: CurrentPlan) {
 export function upgradeTargets(from: CurrentPlan): PlanCode[] {
   return (Object.keys(PLANS) as PlanCode[]).filter(p => PLAN_RANK[p] > PLAN_RANK[from]);
 }
-// Upgrade value credited for incentives: new plan price minus current plan price.
-export function upgradeValue(from: CurrentPlan, to: PlanCode) {
-  return Math.max(0, PLANS[to].price - planPrice(from));
+// Upgrade value credited for incentives: new plan price minus what the merchant pays for the current
+// plan that month (before its first renewal: the purchase price; from the renewal date: the renewal price).
+export function upgradeValue(from: CurrentPlan, to: PlanCode, renewed = false) {
+  return Math.max(0, PLANS[to].price - planPrice(from, renewed));
+}
+// Whether `on` is on or after the first renewal of a subscription bought on `subscribed`. Renewal
+// is the same date next month (12 Mar → 12 Apr, 30 Apr → 30 May); a date the next month lacks
+// renews on that month's last day (31 Jan → 28 Feb, 31 Oct → 30 Nov).
+export function renewalDate(subscribed: string) {
+  const [y, m, d] = subscribed.slice(0, 10).split('-').map(Number);
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m, Math.min(d, last))).toISOString().slice(0, 10);
+}
+export function isRenewed(subscribed: string | null | undefined, on: string) {
+  if (!subscribed) return false;
+  return on >= renewalDate(String(subscribed));
 }
 // Sub Raw plan name → plan ("₹799 Plan" / "₹499 Plan" → legacy).
 export function planFromName(name: unknown): CurrentPlan | null {
