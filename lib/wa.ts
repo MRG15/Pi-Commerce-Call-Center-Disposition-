@@ -234,7 +234,7 @@ export async function runCsmWaTriggers(sql:any,runId:number){
     WITH m AS (
       SELECT s.customer_id,s.status,s.cancelled_at,s.expected_renewal_due_date::text AS due,s.wallet_balance::float8 AS credits,
         COALESCE(NULLIF(s.merchant_name,''),a.name) AS name,COALESCE(NULLIF(s.phone_number,''),a.phone) AS phone,
-        a.impressions,a.last_end::text AS last_end,a.active_ads,
+        a.impressions,a.total_impressions,a.last_end::text AS last_end,a.active_ads,
         (c.current_status='lost') AS onb_lost,
         EXISTS(SELECT 1 FROM onboarding_events e WHERE e.customer_id=s.customer_id AND e.source_type='customer_success_followup'
           AND e.l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED')) AS closed,
@@ -321,7 +321,10 @@ export async function ensureCsmWaRun(sql:any){
     WHERE id=(SELECT max(id) FROM csm_sync_runs WHERE status='complete') AND wa_templates IS DISTINCT FROM ${live}
     RETURNING id
   `;
-  if(claim[0]) await runCsmWaTriggers(sql,Number(claim[0].id));
+  if(!claim[0]) return;
+  // A run that errors is released, so the next trigger tries again instead of skipping the day.
+  try{await runCsmWaTriggers(sql,Number(claim[0].id));}
+  catch(e){await sql`UPDATE csm_sync_runs SET wa_templates=NULL WHERE id=${claim[0].id}`;throw e;}
 }
 
 // A new disposition by the workspace clears that merchant's open callback requests there.
