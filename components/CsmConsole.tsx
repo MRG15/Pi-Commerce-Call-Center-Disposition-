@@ -106,7 +106,7 @@ export default function CsmConsole(){
               <MerchantDetail data={selected} nodes={nodes} admin={admin} csms={data?.csms||[]} row={merchants.find(m=>String(m.customer_id)===String(selected.customerId))}
                 onSaved={async()=>{await loadMerchants();await openMerchant(selected.customerId);}}/>}
           </section>;
-  return <div className="app-shell"><NewCallbackPill rows={reqCb} onOpen={(r:any)=>{setView('reqcb');if(r.customer_id)openMerchant(r.customer_id);}} onView={()=>setView('reqcb')}/>
+  return <div className="app-shell"><NewCallbackPill rows={reqCb} onOpen={(r:any)=>{if(r.customer_id){setView('queues');openMerchant(String(r.customer_id));}else setView('reqcb');}} onView={()=>setView('reqcb')}/>
     <header><div><strong>Pi Commerce</strong><span> · CSM Workspace</span></div><div className="header-actions">
       {(user.isSuperAdmin||user.access?.seller)&&<a href="/">Seller Workspace</a>}
       {(user.isSuperAdmin||user.access?.onboarding)&&<a href="/onboarding">Onboarding Workspace</a>}
@@ -117,7 +117,7 @@ export default function CsmConsole(){
       <nav className="side-nav">{nav.map(([k,l])=><button key={k} className={[view===k?'active':'',k==='reqcb'?reqCbGlow(reqCb):''].join(' ').trim()} onClick={()=>setView(k)}>{l}</button>)}</nav>
       <main className="leads-main">
         {error&&<div className="error card">{error}</div>}
-        {view==='reqcb'&&<div className="onboarding-grid"><CallbackRequestList rows={reqCb} showOwner={admin} onOpen={(r:any)=>{if(r.customer_id)openMerchant(String(r.customer_id));}}/>{detail}</div>}
+        {view==='reqcb'&&<CallbackRequestList rows={reqCb} showOwner={admin} onOpen={(r:any)=>{if(r.customer_id){setView('queues');openMerchant(String(r.customer_id));}}}/>}
         {!data?.run&&<div className="card empty">No SMB Daily Tracker data yet. The queues fill after the first daily sync (Sub Raw + AdsRun Raw) completes.</div>}
         {data?.run&&view!=='notes'&&view!=='allocation'&&<div className="note csm-sync-note">Data as of {fmt(data.run.finished_at)} · {num(data.run.subs_rows)} subscriptions · {num(data.run.ads_rows)} ads</div>}
         {(view==='queues'||view==='callbacks')&&<section className="card">
