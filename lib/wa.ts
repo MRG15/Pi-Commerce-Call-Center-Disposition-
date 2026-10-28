@@ -6,7 +6,7 @@ import { currentPlanOf } from './plan-upgrade';
 import { planLabel } from './plans';
 
 export type WaTemplate='SELLER_NOT_CONNECTED'|'ONB_NOT_CONNECTED'|'T1_RENEW'|'T2_ENDED_FREE'|'T3_ENDED_TOPUP'|'T4_ENDING_FREE'|'T5_ENDING_TOPUP'|'T1_RENEW_NEXT'
-  |'WB_OPTICAL'|'WB_SPA'|'WB_GENERIC';
+  |'WB_OPTICAL'|'WB_SPA'|'WB_GENERIC'|'REFUND_NOTICE';
 export type WaWorkspace='seller'|'onboarding'|'csm';
 export const SELLER_WA_L0=['l0_voicemail','l0_disconnected','l0_not_connected'];
 // Credits a plan starts with, for onboarding messages sent before Sub Raw has the merchant.
@@ -73,6 +73,8 @@ export const WA_TEMPLATES:Partial<Record<WaTemplate,{name:string;body:string[];c
   // uses the optical template.
   WB_OPTICAL:{name:'pi_ad_status_nice_optical',body:['merchant_name'],callbackButton:'0',
     headerImage:'https://d1ydhiubt2jbeg.cloudfront.net/1599143300/assets/a03cbaebd6404a55b1cb1a82c26fb076.mp4'},
+  // Onboarding admins' "Refunded (no contact)": refund amount + Get ad setup (Request a callback).
+  REFUND_NOTICE:{name:'picommerce_refund',body:['merchant_name','refund_amount'],callbackButton:'0'},
   WB_SPA:{name:'pi_ad_status_ojas_spa',body:['merchant_name'],callbackButton:'0',
     headerImage:'https://d1ydhiubt2jbeg.cloudfront.net/1599143300/assets/c7aea8d8ca314469baeef17d3a69b37d.mp4'},
   WB_GENERIC:{name:'pi_ad_status_nice_optical',body:['merchant_name'],callbackButton:'0',
@@ -168,6 +170,15 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
   const credits=k.credits??(cur.plan&&cur.plan!=='legacy'?PLAN_START_CREDITS[cur.plan]:null);
   const id=await queueWa(sql,{template:'ONB_NOT_CONNECTED',workspace:'onboarding',customerId:k.customer_id,phone:c.phone,agentId,sourceRef:eventRef,
     variables:{merchant_name:c.name,plan_name:planName,purchase_date:fmtDate(k.sale_date),expiry_date:fmtDate(expiry),credits:fmtMoney(credits)}});
+  if(id) await sendQueuedWa(sql,[id]);
+}
+
+// "Refunded (no contact)": sent even though the case is closed (that is the point of it). A tap on
+// Get ad setup reaches the case owner's Req Call Back and reopens the case (app/cb/[token]).
+export async function triggerRefundWa(sql:any,customerId:string,agentId:string,eventRef:string,amount:number){
+  const c=await merchantContact(sql,customerId);
+  const id=await queueWa(sql,{template:'REFUND_NOTICE',workspace:'onboarding',customerId,phone:c.phone,agentId,sourceRef:eventRef,
+    variables:{merchant_name:c.name,refund_amount:Math.round(amount).toLocaleString('en-IN')}});
   if(id) await sendQueuedWa(sql,[id]);
 }
 

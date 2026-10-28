@@ -152,17 +152,22 @@ export async function paytmRequestHolder(sql:any,workspace:'onboarding'|'csm',cu
 }
 
 async function reopenLostCase(sql:any,customerId:string,requestId:string,stage:string){
+  return reopenForCallback(sql,customerId,'callback_requested','Paytm callback request',
+    `Merchant asked for a callback on Paytm${stage?` (${stage.replace(/_/g,' ')})`:''}, request ${requestId}. Lost case reopened.`);
+}
+
+// Reopens the merchant's lost onboarding case when they ask for a callback; the owner stays.
+export async function reopenForCallback(sql:any,customerId:string,reason:'callback_requested'|'refund_callback',by:string,remark:string){
   return sql.begin(async(tx:any)=>{
     const c=(await tx`SELECT id FROM onboarding_cases WHERE customer_id=${customerId} ORDER BY created_at DESC LIMIT 1 FOR UPDATE`)[0];
     if(!c) return false;
     const upd=await tx`UPDATE onboarding_cases SET current_status='open',current_l0='Callback Requested',current_l1=NULL,current_l2=NULL,
-        closed_at=NULL,next_callback_at=now(),last_activity_at=now(),updated_at=now(),reopened_at=now(),reopen_reason='callback_requested'
+        closed_at=NULL,next_callback_at=now(),last_activity_at=now(),updated_at=now(),reopened_at=now(),reopen_reason=${reason}
       WHERE id=${c.id} AND current_status='lost' RETURNING id`;
     if(!upd[0]) return false;
     const n=(await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${c.id}`)[0].n;
     await tx`INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_name_raw,source_type,l0_code,l0_label_snapshot,remark)
-      VALUES(${c.id},${customerId},${n},'Paytm callback request','system','SYSTEM_CALLBACK_REOPENED','Reopened: callback requested',
-        ${`Merchant asked for a callback on Paytm${stage?` (${stage.replace(/_/g,' ')})`:''}, request ${requestId}. Lost case reopened.`})`;
+      VALUES(${c.id},${customerId},${n},${by},'system','SYSTEM_CALLBACK_REOPENED','Reopened: callback requested',${remark})`;
     return true;
   });
 }
