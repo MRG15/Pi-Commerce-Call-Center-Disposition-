@@ -100,6 +100,12 @@ export default function CsmConsole(){
   if(loading||!user)return <div className="center">Loading CSM workspace…</div>;
   const nav:[View,string][]=[['queues','Queues'],['callbacks',`Callbacks${dueCallbacks?` (${dueCallbacks})`:''}`],['reqcb',`Req Call Back${reqCb.length?` (${reqCb.length})`:''}`],['metrics','Daily Metrics'],...(admin?[['notes','Pitch Notes'],['allocation','Allocation']] as [View,string][]:[])];
 
+  const detail=<section className="card case-detail">
+            <div className="section-label">Merchant</div>
+            {detailLoading?<div className="empty">Loading…</div>:!selected?<div className="empty">Open a merchant to see their ads, pitch notes and call history.</div>:
+              <MerchantDetail data={selected} nodes={nodes} admin={admin} csms={data?.csms||[]} row={merchants.find(m=>String(m.customer_id)===String(selected.customerId))}
+                onSaved={async()=>{await loadMerchants();await openMerchant(selected.customerId);}}/>}
+          </section>;
   return <div className="app-shell"><NewCallbackPill rows={reqCb} onOpen={(r:any)=>{setView('reqcb');if(r.customer_id)openMerchant(r.customer_id);}} onView={()=>setView('reqcb')}/>
     <header><div><strong>Pi Commerce</strong><span> · CSM Workspace</span></div><div className="header-actions">
       {(user.isSuperAdmin||user.access?.seller)&&<a href="/">Seller Workspace</a>}
@@ -111,7 +117,7 @@ export default function CsmConsole(){
       <nav className="side-nav">{nav.map(([k,l])=><button key={k} className={[view===k?'active':'',k==='reqcb'?reqCbGlow(reqCb):''].join(' ').trim()} onClick={()=>setView(k)}>{l}</button>)}</nav>
       <main className="leads-main">
         {error&&<div className="error card">{error}</div>}
-        {view==='reqcb'&&<CallbackRequestList rows={reqCb} showOwner={admin} onOpen={(r:any)=>openMerchant(r.customer_id)}/>}
+        {view==='reqcb'&&<div className="onboarding-grid"><CallbackRequestList rows={reqCb} showOwner={admin} onOpen={(r:any)=>{if(r.customer_id)openMerchant(String(r.customer_id));}}/>{detail}</div>}
         {!data?.run&&<div className="card empty">No SMB Daily Tracker data yet. The queues fill after the first daily sync (Sub Raw + AdsRun Raw) completes.</div>}
         {data?.run&&view!=='notes'&&view!=='allocation'&&<div className="note csm-sync-note">Data as of {fmt(data.run.finished_at)} · {num(data.run.subs_rows)} subscriptions · {num(data.run.ads_rows)} ads</div>}
         {(view==='queues'||view==='callbacks')&&<section className="card">
@@ -132,12 +138,7 @@ export default function CsmConsole(){
               {admin&&<button className="csv-btn" onClick={()=>{const rows=view==='callbacks'?callbacks:shown;const name=view==='callbacks'?'callbacks':tab==='cx'&&cxSub?cxSub:tab;downloadCsv(`csm-${name}-${todayIst()}.csv`,CSM_CSV,rows);}}>Download CSV</button>}</div>
             <MerchantList rows={view==='callbacks'?callbacks.filter(m=>{const q=search.trim().toLowerCase();return !q||String(m.customer_id).includes(q)||String(m.merchant_name||'').toLowerCase().includes(q);}):shown} selectedId={selected?.customerId} onOpen={openMerchant} admin={admin} callbacks={view==='callbacks'}/>
           </section>
-          <section className="card case-detail">
-            <div className="section-label">Merchant</div>
-            {detailLoading?<div className="empty">Loading…</div>:!selected?<div className="empty">Open a merchant to see their ads, pitch notes and call history.</div>:
-              <MerchantDetail data={selected} nodes={nodes} admin={admin} csms={data?.csms||[]} row={merchants.find(m=>String(m.customer_id)===String(selected.customerId))}
-                onSaved={async()=>{await loadMerchants();await openMerchant(selected.customerId);}}/>}
-          </section>
+          {detail}
         </div>}
         {view==='metrics'&&<Metrics admin={admin} csms={data?.csms||[]} onOpenBucket={(b:string)=>{setView('queues');setCxSub(b==='cancelled'||b==='lapsed'?b:'');setTab(b==='cancelled'||b==='lapsed'?'cx':(TABS.some(t=>t[0]===b)?b as Tab:'all'));}}/>}
         {view==='notes'&&admin&&<PitchNotes onSaved={loadMerchants}/>}
