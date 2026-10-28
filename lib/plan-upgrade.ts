@@ -30,16 +30,27 @@ export async function currentPlanOf(sql:any,customerId:string):Promise<{plan:Cur
   return a||b||{plan:null,source:null};
 }
 
+// The merchant's subscription date: the onboarding case's sale date, else their first seller sale.
+export async function subscriptionDateOf(sql:any,customerId:string):Promise<string|null>{
+  const r=await sql`
+    SELECT COALESCE(
+      (SELECT min(sale_date)::text FROM onboarding_cases WHERE customer_id=${customerId}),
+      (SELECT min(call_date)::text FROM calls WHERE customer_id=${customerId} AND (l1_label_snapshot='Payment done' OR l2_label_snapshot='Enrolled via WhatsApp'))
+    ) AS d`;
+  return r[0]?.d?String(r[0].d).slice(0,10):null;
+}
+
 // Validates a Plan Upgraded entry: the target must be higher than the merchant's current plan.
 // `chosenCurrent` is only used when the portal cannot tell the current plan.
 export async function resolveUpgrade(sql:any,customerId:string,target:unknown,chosenCurrent?:unknown){
-  const { isPlanCode,upgradeTargets,upgradeValue,PLANS }=await import('./plans');
+  const { isPlanCode,upgradeTargets,upgradeValue,isRenewed,todayIst,PLANS }=await import('./plans');
   if(!isPlanCode(target)) throw new Error('UPGRADE_PLAN_REQUIRED');
   const cur=await currentPlanOf(sql,customerId);
   const from=cur.plan??(isCurrentPlan(chosenCurrent)?chosenCurrent:null);
   if(!from) throw new Error('UPGRADE_CURRENT_REQUIRED');
   if(!upgradeTargets(from).includes(target)) throw new Error('UPGRADE_NOT_HIGHER');
-  return { from, to:target, value:upgradeValue(from,target), price:PLANS[target].price };
+  const renewed=isRenewed(await subscriptionDateOf(sql,customerId),todayIst());
+  return { from, to:target, value:upgradeValue(from,target,renewed), price:PLANS[target].price };
 }
 
 export const UPGRADE_ERRORS:Record<string,string>={
