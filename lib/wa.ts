@@ -178,7 +178,7 @@ export async function triggerOnboardingWa(sql:any,caseId:string,agentId:string,e
 export async function triggerRefundWa(sql:any,customerId:string,agentId:string,eventRef:string,amount:number){
   const c=await merchantContact(sql,customerId);
   const id=await queueWa(sql,{template:'REFUND_NOTICE',workspace:'onboarding',customerId,phone:c.phone,agentId,sourceRef:eventRef,
-    variables:{merchant_name:c.name,refund_amount:Math.round(amount).toLocaleString('en-IN')}});
+    variables:{merchant_name:c.name,refund_amount:amount.toLocaleString('en-IN',{minimumFractionDigits:Number.isInteger(amount)?0:2,maximumFractionDigits:2})}});
   if(id) await sendQueuedWa(sql,[id]);
 }
 
