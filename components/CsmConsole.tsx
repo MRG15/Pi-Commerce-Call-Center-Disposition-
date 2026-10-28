@@ -104,7 +104,7 @@ export default function CsmConsole(){
             <div className="section-label">Merchant</div>
             {detailLoading?<div className="empty">Loading…</div>:!selected?<div className="empty">Open a merchant to see their ads, pitch notes and call history.</div>:
               <MerchantDetail data={selected} nodes={nodes} admin={admin} csms={data?.csms||[]} row={merchants.find(m=>String(m.customer_id)===String(selected.customerId))}
-                onSaved={async()=>{await loadMerchants();await openMerchant(selected.customerId);refreshCallbackRequests();}}/>}
+                onSaved={async()=>{await loadMerchants();await openMerchant(selected.customerId);}}/>}
           </section>;
   return <div className="app-shell"><NewCallbackPill rows={reqCb} onOpen={(r:any)=>{setView('reqcb');if(r.customer_id)openMerchant(r.customer_id);}} onView={()=>setView('reqcb')}/>
     <header><div><strong>Pi Commerce</strong><span> · CSM Workspace</span></div><div className="header-actions">
