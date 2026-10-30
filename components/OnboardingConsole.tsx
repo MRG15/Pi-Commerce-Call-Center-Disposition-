@@ -73,9 +73,9 @@ export default function OnboardingConsole(){
      else if(v.viewPeriod==='custom'&&v.viewFrom&&v.viewTo)loadCases({from:v.viewFrom,to:v.viewTo,agent:v.viewAgent});
      else loadCases({agent:v.viewAgent});
    };
-   const t=setInterval(()=>{if(document.hasFocus())refresh();},30000);
-   document.addEventListener('visibilitychange',refresh);window.addEventListener('focus',refresh);
-   return()=>{clearInterval(t);document.removeEventListener('visibilitychange',refresh);window.removeEventListener('focus',refresh);};
+   const t=setInterval(()=>{if(document.hasFocus())refresh();},120000);
+   window.addEventListener('focus',refresh);
+   return()=>{clearInterval(t);window.removeEventListener('focus',refresh);};
  },[]);
  async function applyView(period=viewPeriod,agent=viewAgent,customFrom=viewFrom,customTo=viewTo){
    setViewLoading(true);setSelected(null);

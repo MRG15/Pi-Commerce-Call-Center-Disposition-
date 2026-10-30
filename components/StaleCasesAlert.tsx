@@ -10,7 +10,7 @@ export default function StaleCasesAlert({onOpen}:{onOpen:(caseId:string)=>void})
  useEffect(()=>{
   let live=true;
   const load=async()=>{if(document.visibilityState!=='visible')return;try{const r=await fetch('/api/onboarding/stale-new-cases',{cache:'no-store'});if(r.ok&&live)setRows((await r.json()).cases||[]);}catch{}};
-  load(); const t=setInterval(load,60000); document.addEventListener('visibilitychange',load);
+  load(); const t=setInterval(()=>{if(document.hasFocus())load();},120000); document.addEventListener('visibilitychange',load);
   return()=>{live=false;clearInterval(t);document.removeEventListener('visibilitychange',load);};
  },[]);
  if(!rows.length) return null;
