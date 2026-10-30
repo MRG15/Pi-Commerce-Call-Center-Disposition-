@@ -13,8 +13,6 @@ export async function GET(req:Request){
   if(!user) return NextResponse.json({error:'Unauthenticated'},{status:401});
   const ws=new URL(req.url).searchParams.get('workspace')||'';
   const sql=db();
-  const ok=await sql`SELECT to_regclass('public.wa_messages') IS NOT NULL AS ok`;
-  if(!ok[0]?.ok) return NextResponse.json({requests:[]});
   if(ws==='seller'){
     if(!canAccess(user,'seller')) return NextResponse.json({error:'Seller access required'},{status:403});
     const all=isWorkspaceAdmin(user,'seller');

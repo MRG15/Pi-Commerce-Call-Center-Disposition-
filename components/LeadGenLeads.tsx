@@ -14,9 +14,9 @@ export function useLeadGen(){
   if(force!==true){const v=await fetch('/api/leadgen/leads?version=1',{cache:'no-store'});if(v.ok){const {v:nv}=await v.json();if(nv&&nv===ver.current)return;ver.current=nv;}}
   const r=await fetch('/api/leadgen/leads',{cache:'no-store'});if(r.ok)setState(await r.json());}catch{}},[]);
  useEffect(()=>{
-  load(); const t=setInterval(()=>{if(document.hasFocus())load();},30000);
-  document.addEventListener('visibilitychange',load); window.addEventListener('focus',load);
-  return()=>{clearInterval(t);document.removeEventListener('visibilitychange',load);window.removeEventListener('focus',load);};
+  load(); const t=setInterval(()=>{if(document.hasFocus())load();},120000);
+  window.addEventListener('focus',load);
+  return()=>{clearInterval(t);window.removeEventListener('focus',load);};
  },[load]);
  const fresh=(state.leads||[]).filter((l:any)=>!l.calls&&(!state.admin||l.assigned_to)).length;
  return {...state,fresh,reload:()=>load(true)};

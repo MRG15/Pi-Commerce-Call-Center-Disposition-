@@ -19,8 +19,10 @@ export function useCallbackRequests(workspace:'seller'|'onboarding'|'csm'){
  useEffect(()=>{
   let live=true;
   const load=async()=>{if(document.visibilityState!=='visible')return;try{const r=await fetch('/api/callback-requests?workspace='+workspace,{cache:'no-store'});if(r.ok&&live)setRows((await r.json()).requests||[]);}catch{}};
-  load(); const t=setInterval(()=>{if(document.hasFocus())load();},15000); document.addEventListener('visibilitychange',load); window.addEventListener('focus',load); window.addEventListener('reqcb:refresh',load);
-  return()=>{live=false;clearInterval(t);document.removeEventListener('visibilitychange',load);window.removeEventListener('focus',load);window.removeEventListener('reqcb:refresh',load);};
+  // Every minute while the tab is visible (also behind the dialer, so new requests show without a
+  // click), and once on coming back to the tab. ponytail: polling; push events if a minute is too slow.
+  load(); const t=setInterval(load,60000); document.addEventListener('visibilitychange',load); window.addEventListener('reqcb:refresh',load);
+  return()=>{live=false;clearInterval(t);document.removeEventListener('visibilitychange',load);window.removeEventListener('reqcb:refresh',load);};
  },[workspace]);
  return rows;
 }
