@@ -91,3 +91,13 @@
 .plan-card-head em{font-style:normal;color:var(--muted);font-size:12px;margin-left:auto}
 .plan-team{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;background:#eef8ff;color:var(--navy);border-radius:999px;padding:3px 8px}
 .plan-card p{margin:2px 0;font-size:13px;color:var(--text);line-height:1.45}
+
+/* Onboarding: Completed outcome picker beside Download CSV; Remove on the Lost disposition. */
+.head-actions{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
+.head-select{width:auto;padding:5px 6px;border:1px solid var(--border);border-radius:7px;background:white;color:var(--navy);font-size:12px;font-weight:700;margin-bottom:14px;cursor:pointer}
+.remove-lost{color:#b42318;font-size:13px;margin-top:6px}
+.remove-lost-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.remove-lost-form input{flex:1;min-width:200px}
+.remove-lost-form .linkbtn{color:#475569}
+.remove-lost-form .primary{margin-top:0}
+.remove-lost{padding:0}
