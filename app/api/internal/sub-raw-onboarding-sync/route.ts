@@ -377,9 +377,9 @@ export async function POST(req:Request){
         return;
       }
       if(c.current_status==='lost' && isLiveAsOfCutoff){
-        // The merchant went live on their own after the agent closed the case as lost.
-        // Keep the agent's last disposition and lost status; only record the external Ads Live
-        // so it counts in Ads Made Live Externally and the Ads Live Rate.
+        // The merchant went live on their own after the agent closed the case as lost: the case is
+        // reopened as Ads Live (externally). It counts in Ads Made Live Externally, the Ads Live Rate
+        // and Ads Live from Reopened; external lives earn no incentive.
         const lostAttemptRows=await tx`
           SELECT COALESCE(MAX(attempt_number),0)+1 AS n
           FROM onboarding_events
@@ -393,12 +393,15 @@ export async function POST(req:Request){
           VALUES(
             ${c.id}::uuid,${row.customerId},${Number(lostAttemptRows[0]?.n||1)},'system','Sub Raw',${row.sourceRow},
             'SYSTEM_EXTERNAL_ADS_LIVE','Externally Ads Live',
-            'Ads execution detected from Sub Raw T-1 sync after the case was closed as lost; lost disposition retained.'
+            'Ads execution detected from Sub Raw T-1 sync after the case was closed as lost; case reopened as Ads Live.'
           )
         `;
         await tx`
           UPDATE onboarding_cases
-          SET ads_live_at=(${row.firstAdDate}::date::timestamp AT TIME ZONE 'Asia/Kolkata'),updated_at=now()
+          SET ads_live_at=(${row.firstAdDate}::date::timestamp AT TIME ZONE 'Asia/Kolkata'),
+              closed_at=(${row.firstAdDate}::date::timestamp AT TIME ZONE 'Asia/Kolkata'),
+              current_status='ads_live',current_l0='Externally Ads Live',current_l1=NULL,current_l2=NULL,
+              reopened_at=now(),reopen_reason=NULL,updated_at=now()
           WHERE id=${c.id}::uuid
         `;
         summary.lostMarkedExternalLive++;
