@@ -140,6 +140,39 @@ export async function GET(req:Request){
     ORDER BY ads_live DESC,a.name
   `;
 
+  // Lost cases brought back: marked Not Interested / Refund Requested, then reopened (admin Remove Lost,
+  // a callback / refund-callback tap, or a manual reopen). The reopen counts on its own date; a later
+  // Ads Live counts on the day it went live (and is already in Ads Live and the Ads Live Rate).
+  const reopenedRows=await sql`
+    WITH lostev AS (
+      SELECT onboarding_case_id AS cid,min(event_time) AS lost_at FROM onboarding_events
+      WHERE source_type='new_event' AND l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') GROUP BY 1
+    ), re AS (
+      SELECT l.cid,l.lost_at,(SELECT min(e.event_time) FROM onboarding_events e WHERE e.onboarding_case_id=l.cid AND e.event_time>l.lost_at
+        AND (e.l0_code IN ('SYSTEM_LOST_REMOVED','SYSTEM_CALLBACK_REOPENED','SYSTEM_REOPENED')
+          OR (e.source_type='new_event' AND e.l0_code NOT IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED')))) AS re_at
+      FROM lostev l
+    ), x AS (
+      SELECT (re.lost_at AT TIME ZONE 'Asia/Kolkata')::date AS lost_d,(re.re_at AT TIME ZONE 'Asia/Kolkata')::date AS re_d,
+        -- Live after the reopen; the live date can sit a day before it when it comes from ad data, so an
+        -- Ads Live logged after the reopen also counts.
+        CASE WHEN re.re_at IS NOT NULL AND c.ads_live_at IS NOT NULL AND (c.ads_live_at>=re.re_at OR EXISTS(SELECT 1 FROM onboarding_events a
+          WHERE a.onboarding_case_id=re.cid AND a.l0_code='OB_ADS_LIVE' AND a.event_time>=re.re_at)) THEN (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date END AS live_d
+      FROM re JOIN onboarding_cases c ON c.id=re.cid
+    )
+    SELECT
+      COUNT(*) FILTER (WHERE lost_d<=${to}::date)::int AS lost_as_on,
+      COUNT(*) FILTER (WHERE re_d BETWEEN ${from}::date AND ${to}::date)::int AS reopened,
+      COUNT(*) FILTER (WHERE re_d<=${to}::date)::int AS reopened_as_on,
+      COUNT(*) FILTER (WHERE live_d BETWEEN ${from}::date AND ${to}::date)::int AS reopened_ads_live,
+      COUNT(*) FILTER (WHERE live_d<=${to}::date)::int AS reopened_ads_live_as_on
+    FROM x
+  `;
+  const ro:any=reopenedRows[0]||{};
+  const pct=(a:number,b:number)=>b?Math.round(a*1000/b)/10:0;
+  const reopened={reopened:Number(ro.reopened||0),reopened_ads_live:Number(ro.reopened_ads_live||0),
+    reopened_rate:pct(Number(ro.reopened_as_on||0),Number(ro.lost_as_on||0)),
+    reopened_ads_live_rate:pct(Number(ro.reopened_ads_live_as_on||0),Number(ro.reopened_as_on||0))};
   const s:any=summary[0]||{}; const asOnReceived=Number(s.as_on_cases_received||0); const asOnAds=Number(s.as_on_ads_live||0);
-  return NextResponse.json({...s,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
+  return NextResponse.json({...s,...reopened,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
 }
