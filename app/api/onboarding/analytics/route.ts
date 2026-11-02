@@ -163,10 +163,15 @@ export async function GET(req:Request){
       COUNT(*) FILTER (WHERE live_d<=${to}::date)::int AS reopened_ads_live_as_on
     FROM x
   `;
+  // Revival calls on Lost cases in the period: every call, and the distinct cases called.
+  const revival=(await sql`
+    SELECT COUNT(*)::int AS revival_calls,COUNT(DISTINCT onboarding_case_id)::int AS lost_cases_called
+    FROM onboarding_events WHERE source_type='revival_call' AND event_date BETWEEN ${from}::date AND ${to}::date
+  `)[0]||{};
   const ro:any=reopenedRows[0]||{};
   const pct=(a:number,b:number)=>b?Math.round(a*1000/b)/10:0;
   const reopened={reopened_ads_live:Number(ro.reopened_ads_live||0),
     reopened_ads_live_rate:pct(Number(ro.reopened_ads_live_as_on||0),Number(ro.lost_as_on||0))};
   const s:any=summary[0]||{}; const asOnReceived=Number(s.as_on_cases_received||0); const asOnAds=Number(s.as_on_ads_live||0);
-  return NextResponse.json({...s,...reopened,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
+  return NextResponse.json({...s,...reopened,...revival,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
 }
