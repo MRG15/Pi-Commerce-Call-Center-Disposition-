@@ -97,7 +97,7 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
   const cutoff=Date.now()-2*DAY;
   const rows=input.map(r=>({id:s(r.id)?.replace(/\.0$/,'')||null,at:istTime(r.requested_at),r})).filter(x=>x.id&&x.at)
     .sort((a,b)=>a.at!.getTime()-b.at!.getTime());
-  let created=0,merged=0,seen=0,old=0,reopened=0;
+  let created=0,merged=0,seen=0,old=0,reopened=0,skipped=0;
   const rotations:Record<string,any[]>={};
   const nextOf=async(team:'sales'|'onboarding'|'csm')=>{
     const list=rotations[team]??=await teamRotation(sql,team);
@@ -113,6 +113,10 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
     const custId=String(r.cust_id??'').trim().replace(/\.0$/,'');
     const customerId=await customerFor(sql,/^\d{5,}$/.test(custId)?custId:null,mid,phone);
     const at=x.at!.toISOString();
+    // Onboarding requests for a merchant already Ads Live are skipped (the ad went live meanwhile).
+    if(team==='onboarding'&&customerId&&(await sql`SELECT 1 FROM onboarding_cases WHERE customer_id=${customerId} AND current_status='ads_live' LIMIT 1`)[0]){
+      await sql`INSERT INTO paytm_callback_ids(request_id) VALUES(${x.id}) ON CONFLICT DO NOTHING`;skipped++;continue;
+    }
     const info={request_id:x.id,mid:mid||'',business_name:s(r.business_name)||'',stage:s(r.stage)||'',reason:s(r.reason)||'',
       subscription_status:s(r.subscription_status)||'',ad_live_status:s(r.ad_live_status)||'',onboarding_stage:s(r.onboarding_stage)||''};
     const who=customerId?sql`customer_id=${customerId}`:sql`customer_id IS NULL AND phone=${phone}`;
@@ -141,7 +145,7 @@ export async function ingestPaytmCallbacks(sql:any,input:PaytmCallbackRow[]){
       if(team==='onboarding'&&customerId&&await reopenLostCase(sql,customerId,x.id!,info.stage)) reopened++;
     }
   }
-  return {created,merged,seen,old,reopened};
+  return {created,merged,seen,old,reopened,skipped};
 }
 
 // The agent holds an open Paytm callback request for this merchant in this workspace.

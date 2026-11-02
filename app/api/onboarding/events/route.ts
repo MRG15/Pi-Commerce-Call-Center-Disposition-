@@ -88,6 +88,22 @@ export async function POST(req:Request){
         return;
       }
 
+      // Revival call: a call on a Lost case. Kept as its own source type so Touches / Connected don't
+      // change; the case stays Lost until an admin removes Lost.
+      if(l0Code==='OB_REVIVAL_CALL'){
+        if(c.current_status!=='lost') throw new Error('REVIVAL_LOST_ONLY');
+        if(!l1||l2Code) throw new Error('REASON_REQUIRED');
+        const cb=l1Code==='OB_RV_CALLBACK'?toIstCallback(body.callbackDate?String(body.callbackDate):null,body.callbackTime?String(body.callbackTime):null):null;
+        if(l1Code==='OB_RV_CALLBACK'&&!cb) throw new Error('CALLBACK_REQUIRED');
+        if(cb&&cb.getTime()<=Date.now()) throw new Error('CALLBACK_PAST');
+        await tx`
+          INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,agent_id,agent_name_raw,source_type,l0_code,l1_code,l0_label_snapshot,l1_label_snapshot,remark,callback_at)
+          VALUES(${caseId}::uuid,${c.customer_id},${attempt},${user.id}::uuid,${user.name},'revival_call',${l0Code},${l1Code},${l0.label},${l1.label},${remark},${cb})
+        `;
+        await tx`UPDATE onboarding_cases SET updated_at=now() WHERE id=${caseId}::uuid`;
+        return;
+      }
+
       // Refunded (no contact): recorded on an open or closed case without changing its status; the
       // refund WhatsApp goes out after the save.
       if(l0Code==='OB_REFUND_PROCESSED'){
@@ -165,7 +181,7 @@ export async function POST(req:Request){
     return NextResponse.json({ok:true});
   }catch(e:any){
     const code=String(e?.message||'');
-    const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],TECH_NOT_FOUND:['Technical case is already resolved or not found.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400],TOPUP_REQUIRED:['Enter the additional top-up amount.',400],TOPUP_ADS_LIVE_ONLY:['Additional top-up can only be logged after Ads Live.',409],CSM_ONLY:['Post-live follow-ups are logged in the CSM workspace.',403]};
+    const map:any={CASE_NOT_FOUND:['Case not found',404],NOT_ASSIGNED:['This case is assigned to another onboarder.',403],CASE_CLOSED:['This onboarding case is already closed.',409],REVIVAL_LOST_ONLY:['Revival call is only for Lost cases.',409],TECH_NOT_FOUND:['Technical case is already resolved or not found.',409],BAD_TAXONOMY:['Invalid onboarding disposition.',400],L1_REQUIRED:['Select an in-process reason.',400],REASON_REQUIRED:['Select a reason for this outcome.',400],L2_REQUIRED:['Select the technical issue.',400],CALLBACK_REQUIRED:['Callback date and time are required.',400],CALLBACK_PAST:['Callback must be in the future.',400],REMARK_REQUIRED:['A remark is required for this option.',400],TOPUP_REQUIRED:['Enter the additional top-up amount.',400],TOPUP_ADS_LIVE_ONLY:['Additional top-up can only be logged after Ads Live.',409],CSM_ONLY:['Post-live follow-ups are logged in the CSM workspace.',403]};
     if(UPGRADE_ERRORS[code]) return NextResponse.json({error:UPGRADE_ERRORS[code]},{status:400});
     const hit=map[code]; if(hit) return NextResponse.json({error:hit[0]},{status:hit[1]});
     console.error('onboarding event error',e);
