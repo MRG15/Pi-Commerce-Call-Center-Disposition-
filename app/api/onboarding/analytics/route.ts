@@ -51,9 +51,10 @@ export async function GET(req:Request){
 
   const events=await sql`
     SELECT
-      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND COALESCE(l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND event_date BETWEEN ${from}::date AND ${to}::date)::int AS touches,
-      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND event_date BETWEEN ${from}::date AND ${to}::date AND l0_label_snapshot IS NOT NULL AND l0_label_snapshot<>'Not Connected')::int AS connected,
-      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import') AND COALESCE(l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND event_date BETWEEN ${from}::date AND ${to}::date AND callback_at IS NOT NULL)::int AS callbacks_scheduled,
+      -- Touches include revival calls on Lost cases; a revival call marked Not connected is not Connected.
+      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import','revival_call') AND COALESCE(l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND event_date BETWEEN ${from}::date AND ${to}::date)::int AS touches,
+      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import','revival_call') AND event_date BETWEEN ${from}::date AND ${to}::date AND l0_label_snapshot IS NOT NULL AND l0_label_snapshot<>'Not Connected' AND COALESCE(l1_code,'')<>'OB_RV_NOT_CONNECTED')::int AS connected,
+      COUNT(*) FILTER (WHERE source_type IN ('new_event','historical_import','revival_call') AND COALESCE(l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND event_date BETWEEN ${from}::date AND ${to}::date AND callback_at IS NOT NULL)::int AS callbacks_scheduled,
       COUNT(DISTINCT customer_id) FILTER (
         WHERE source_type IN ('new_event','historical_import')
           AND event_date BETWEEN ${from}::date AND ${to}::date
@@ -128,7 +129,7 @@ export async function GET(req:Request){
         AND (t.resolved_at IS NULL OR (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)
         AND (c.ads_live_at IS NULL OR (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)) AS tech_open,
       (SELECT COUNT(*)::int FROM technical_cases t WHERE t.assigned_to=a.id AND t.status='resolved' AND COALESCE(t.source_type,'')<>'customer_success_followup' AND t.resolved_at IS NOT NULL AND (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS tech_resolved,
-      (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','historical_import') AND COALESCE(e.l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS touches,
+      (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','historical_import','revival_call') AND COALESCE(e.l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS touches,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.l0_code='OB_SUBS_RENEWED' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS subscriptions_renewed,
       (SELECT COALESCE(SUM(e.top_up_amount_inr),0)::numeric FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND COALESCE(e.l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS top_up_amount,
       (SELECT ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (c.ads_live_at-COALESCE(c.sale_date::timestamptz,c.created_at)))/86400.0)),1)
@@ -168,10 +169,27 @@ export async function GET(req:Request){
     SELECT COUNT(*)::int AS revival_calls,COUNT(DISTINCT onboarding_case_id)::int AS lost_cases_called
     FROM onboarding_events WHERE source_type='revival_call' AND event_date BETWEEN ${from}::date AND ${to}::date
   `)[0]||{};
+  // Lost case revival per case owner: cases ever marked Lost (as on the end date), those given a
+  // revival call in the period, and those that went Ads Live after the Lost in the period.
+  const revivalByAgent=await sql`
+    WITH lostev AS (
+      SELECT onboarding_case_id AS cid,min(event_time) AS lost_at FROM onboarding_events
+      WHERE source_type IN ('new_event','historical_import') AND l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') GROUP BY 1
+    )
+    SELECT a.name,
+      COUNT(*)::int AS lost,
+      COUNT(*) FILTER (WHERE EXISTS(SELECT 1 FROM onboarding_events r WHERE r.onboarding_case_id=l.cid AND r.source_type='revival_call'
+        AND r.event_date BETWEEN ${from}::date AND ${to}::date))::int AS called,
+      COUNT(*) FILTER (WHERE c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
+        AND EXISTS(SELECT 1 FROM onboarding_events v WHERE v.onboarding_case_id=l.cid AND v.l0_code IN ('OB_ADS_LIVE','SYSTEM_EXTERNAL_ADS_LIVE') AND v.event_time>l.lost_at))::int AS revived
+    FROM lostev l JOIN onboarding_cases c ON c.id=l.cid JOIN agents a ON a.id=c.assigned_to
+    WHERE (l.lost_at AT TIME ZONE 'Asia/Kolkata')::date<=${to}::date
+    GROUP BY a.name ORDER BY lost DESC,a.name
+  `;
   const ro:any=reopenedRows[0]||{};
   const pct=(a:number,b:number)=>b?Math.round(a*1000/b)/10:0;
   const reopened={reopened_ads_live:Number(ro.reopened_ads_live||0),
     reopened_ads_live_rate:pct(Number(ro.reopened_ads_live_as_on||0),Number(ro.lost_as_on||0))};
   const s:any=summary[0]||{}; const asOnReceived=Number(s.as_on_cases_received||0); const asOnAds=Number(s.as_on_ads_live||0);
-  return NextResponse.json({...s,...reopened,...revival,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
+  return NextResponse.json({...s,...reopened,...revival,revivalByAgent,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
 }
