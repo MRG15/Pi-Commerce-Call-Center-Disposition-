@@ -1,4 +1,5 @@
 'use client';
+import AppShell from './AppShell';
 import UpgradePicker from './UpgradePicker';
 import CallbackRequestList,{useCallbackRequests,refreshCallbackRequests,NewCallbackPill,reqCbGlow} from './CallbackRequests';
 import { useEffect,useMemo,useState } from 'react';
@@ -106,15 +107,9 @@ export default function CsmConsole(){
               <MerchantDetail data={selected} nodes={nodes} admin={admin} csms={data?.csms||[]} row={merchants.find(m=>String(m.customer_id)===String(selected.customerId))}
                 onSaved={async()=>{await loadMerchants();await openMerchant(selected.customerId);}}/>}
           </section>;
-  return <div className="app-shell"><NewCallbackPill rows={reqCb} onOpen={(r:any)=>{if(r.customer_id){setView('queues');openMerchant(String(r.customer_id));}else setView('reqcb');}} onView={()=>setView('reqcb')}/>
-    <header><div><strong>Pi Commerce</strong><span> · CSM Workspace</span></div><div className="header-actions">
-      {(user.isSuperAdmin||user.access?.seller)&&<a href="/">Seller Workspace</a>}
-      {(user.isSuperAdmin||user.access?.onboarding)&&<a href="/onboarding">Onboarding Workspace</a>}
-      {user.isSuperAdmin&&<a href="/admin/access">Manage Access</a>}
-      <span className="badge">{user.name}{admin?' · CSM Admin':''}</span><button className="linkbtn" onClick={logout}>Logout</button>
-    </div></header>
-    <div className="seller-shell">
-      <nav className="side-nav">{nav.map(([k,l])=><button key={k} className={[view===k?'active':'',k==='reqcb'?reqCbGlow(reqCb):''].join(' ').trim()} onClick={()=>setView(k)}>{l}</button>)}</nav>
+  return <AppShell user={user} title={admin?"CSM Workspace · Admin":"CSM Workspace"} views={nav.map(([k,l])=>({key:k,label:l,active:view===k,className:k==='reqcb'?reqCbGlow(reqCb):'',onClick:()=>setView(k)}))}><NewCallbackPill rows={reqCb} onOpen={(r:any)=>{if(r.customer_id){setView('queues');openMerchant(String(r.customer_id));}else setView('reqcb');}} onView={()=>setView('reqcb')}/>
+    
+          
       <main className="leads-main">
         {error&&<div className="error card">{error}</div>}
         {view==='reqcb'&&<CallbackRequestList rows={reqCb} showOwner={admin} onOpen={(r:any)=>{if(r.customer_id){setView('queues');openMerchant(String(r.customer_id));}}}/>}
@@ -144,8 +139,7 @@ export default function CsmConsole(){
         {view==='notes'&&admin&&<PitchNotes onSaved={loadMerchants}/>}
         {view==='allocation'&&admin&&<Allocation data={data} reload={loadMerchants}/>}
       </main>
-    </div>
-  </div>;
+    </AppShell>;
 }
 
 function MerchantList({rows,selectedId,onOpen,admin,callbacks}:{rows:any[];selectedId?:string;onOpen:(id:string)=>void;admin:boolean;callbacks:boolean}){
