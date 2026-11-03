@@ -130,6 +130,7 @@ export async function GET(req:Request){
         AND (c.ads_live_at IS NULL OR (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date > ${to}::date)) AS tech_open,
       (SELECT COUNT(*)::int FROM technical_cases t WHERE t.assigned_to=a.id AND t.status='resolved' AND COALESCE(t.source_type,'')<>'customer_success_followup' AND t.resolved_at IS NOT NULL AND (t.resolved_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date) AS tech_resolved,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type IN ('new_event','historical_import','revival_call') AND COALESCE(e.l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS touches,
+      (SELECT COUNT(DISTINCT e.onboarding_case_id)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='revival_call' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS lost_called,
       (SELECT COUNT(*)::int FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND e.l0_code='OB_SUBS_RENEWED' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS subscriptions_renewed,
       (SELECT COALESCE(SUM(e.top_up_amount_inr),0)::numeric FROM onboarding_events e WHERE e.agent_id=a.id AND e.source_type='new_event' AND COALESCE(e.l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND e.event_date BETWEEN ${from}::date AND ${to}::date) AS top_up_amount,
       (SELECT ROUND(AVG(GREATEST(0,EXTRACT(EPOCH FROM (c.ads_live_at-COALESCE(c.sale_date::timestamptz,c.created_at)))/86400.0)),1)
