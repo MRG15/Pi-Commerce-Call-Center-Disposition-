@@ -189,10 +189,35 @@ export async function GET(req:Request){
     WHERE (l.lost_at AT TIME ZONE 'Asia/Kolkata')::date<=${to}::date
     GROUP BY a.name HAVING COUNT(*) FILTER (WHERE c.current_status IN ('lost','ads_live'))>0 ORDER BY lost DESC,a.name
   `;
+  // New case progress per case owner: cases received in the period (as Cases Received), and where they
+  // stand as on the end date. Ads Live + Lost + Open add up to Received; Called = got any call (any
+  // outcome, revival calls too) by the end date. Ads Live splits into taken live by the onboarder and
+  // live on their own (external, no onboarder credit, as in the table and incentives).
+  const newCaseByAgent=await sql`
+    WITH r AS (
+      SELECT c.id,c.assigned_to,c.current_status,
+        (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date AS live_d,(c.closed_at AT TIME ZONE 'Asia/Kolkata')::date AS closed_d,
+        EXISTS(SELECT 1 FROM onboarding_events x WHERE x.onboarding_case_id=c.id AND x.l0_code='SYSTEM_EXTERNAL_ADS_LIVE') AS external,
+        EXISTS(SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.source_type IN ('new_event','historical_import','revival_call')
+          AND COALESCE(e.l0_code,'')<>'OB_ADDITIONAL_TOPUP' AND e.event_date<=${to}::date) AS called
+      FROM onboarding_cases c
+      WHERE (CASE WHEN c.source_type='historical_import' THEN c.sale_date ELSE (c.created_at AT TIME ZONE 'Asia/Kolkata')::date END) BETWEEN ${from}::date AND ${to}::date
+    ), s AS (
+      SELECT r.*,(live_d IS NOT NULL AND live_d<=${to}::date) AS live,(current_status='lost' AND closed_d IS NOT NULL AND closed_d<=${to}::date) AS lost FROM r
+    )
+    SELECT COALESCE(a.name,'Unassigned') AS name,COUNT(*)::int AS received,
+      COUNT(*) FILTER (WHERE called)::int AS called,
+      COUNT(*) FILTER (WHERE live AND NOT external)::int AS live_onboarder,
+      COUNT(*) FILTER (WHERE live AND external)::int AS live_self,
+      COUNT(*) FILTER (WHERE lost AND NOT live)::int AS lost,
+      COUNT(*) FILTER (WHERE NOT live AND NOT lost)::int AS open
+    FROM s LEFT JOIN agents a ON a.id=s.assigned_to
+    GROUP BY 1 ORDER BY received DESC,1
+  `;
   const ro:any=reopenedRows[0]||{};
   const pct=(a:number,b:number)=>b?Math.round(a*1000/b)/10:0;
   const reopened={reopened_ads_live:Number(ro.reopened_ads_live||0),
     reopened_ads_live_rate:pct(Number(ro.reopened_ads_live_as_on||0),Number(ro.lost_as_on||0))};
   const s:any=summary[0]||{}; const asOnReceived=Number(s.as_on_cases_received||0); const asOnAds=Number(s.as_on_ads_live||0);
-  return NextResponse.json({...s,...reopened,...revival,revivalByAgent,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
+  return NextResponse.json({...s,...reopened,...revival,revivalByAgent,newCaseByAgent,...(events[0]||{}),...(ageing[0]||{}),...(tech[0]||{}),ads_live_rate:asOnReceived?Math.round(asOnAds*1000/asOnReceived)/10:0,agentPerformance:agents});
 }

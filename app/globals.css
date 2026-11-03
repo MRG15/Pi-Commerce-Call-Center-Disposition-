@@ -143,3 +143,6 @@
 .rv-lost{background:#c7cdd8}.rv-called{background:#3b82f6}.rv-revived{background:#059669}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
 @media(max-width:600px){.rv-row{grid-template-columns:90px 1fr}}
+.rv-received{background:#94a3b8}.rv-self{background:#86efac}.rv-lostn{background:#f97316}.rv-open{background:#c7cdd8}
+.rv-bar i+i{border-top-left-radius:0;border-bottom-left-radius:0}
+.rv-stack{display:flex;height:10px;border-radius:3px;overflow:hidden}.rv-stack i{height:10px;border-radius:0}
