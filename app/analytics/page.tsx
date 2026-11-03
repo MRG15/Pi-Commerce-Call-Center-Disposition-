@@ -76,7 +76,7 @@ function RevivalSection({rows}:{rows:any[]}){
   <select className="head-select" value={who} onChange={e=>setWho(e.target.value)} aria-label="Onboarder"><option value="">All onboarders</option>{rows.map(r=><option key={r.name} value={r.name}>{r.name}</option>)}</select></div>
   <div className="rv-legend">{bars.map(([k,l])=><span key={k}><i className={'rv-'+k}/>{l} {tot(k)}</span>)}</div>
   {shown.length===0?<div className="empty">No lost cases.</div>:<div className="rv-list">{shown.map(r=><div className="rv-row" key={r.name}><div className="rv-name">{r.name}</div><div className="rv-bars">{bars.map(([k,l])=><div className="rv-bar" key={k}><i className={'rv-'+k} style={{width:`${Math.max(Number(r[k])?2:0,Number(r[k]||0)*100/max)}%`}}/><b>{r[k]}</b><span className="sr-only">{l}</span></div>)}</div></div>)}</div>}
-  <div className="note">Lost: cases owned that were ever marked Not Interested / Refund (as on the end date). Called: given a revival call in the period. Revived: went Ads Live after the Lost in the period.</div>
+  <div className="note">Lost: cases Lost now (the Lost tab). Called: of those, given a revival call in the period. Revived: once Lost, now Ads Live, gone live in the period.</div>
  </section>;
 }
 function K({n,l}:{n:any,l:string}){return <div><b>{n}</b><span>{l}</span></div>}

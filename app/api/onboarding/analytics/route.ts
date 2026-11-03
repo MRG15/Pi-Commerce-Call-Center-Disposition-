@@ -170,22 +170,24 @@ export async function GET(req:Request){
     SELECT COUNT(*)::int AS revival_calls,COUNT(DISTINCT onboarding_case_id)::int AS lost_cases_called
     FROM onboarding_events WHERE source_type='revival_call' AND event_date BETWEEN ${from}::date AND ${to}::date
   `)[0]||{};
-  // Lost case revival per case owner: cases ever marked Lost (as on the end date), those given a
-  // revival call in the period, and those that went Ads Live after the Lost in the period.
+  // Lost case revival per case owner, matching the portal's buckets (no overlap):
+  //   Lost     — cases Lost now (the Lost tab)
+  //   Called   — of those, given a revival call in the period
+  //   Revived  — cases once Lost that are Ads Live now, gone live in the period
   const revivalByAgent=await sql`
     WITH lostev AS (
       SELECT onboarding_case_id AS cid,min(event_time) AS lost_at FROM onboarding_events
       WHERE source_type IN ('new_event','historical_import') AND l0_code IN ('OB_NOT_INTERESTED','OB_REFUND_REQUESTED') GROUP BY 1
     )
     SELECT a.name,
-      COUNT(*)::int AS lost,
-      COUNT(*) FILTER (WHERE EXISTS(SELECT 1 FROM onboarding_events r WHERE r.onboarding_case_id=l.cid AND r.source_type='revival_call'
+      COUNT(*) FILTER (WHERE c.current_status='lost')::int AS lost,
+      COUNT(*) FILTER (WHERE c.current_status='lost' AND EXISTS(SELECT 1 FROM onboarding_events r WHERE r.onboarding_case_id=l.cid AND r.source_type='revival_call'
         AND r.event_date BETWEEN ${from}::date AND ${to}::date))::int AS called,
-      COUNT(*) FILTER (WHERE c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
+      COUNT(*) FILTER (WHERE c.current_status='ads_live' AND c.ads_live_at IS NOT NULL AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
         AND EXISTS(SELECT 1 FROM onboarding_events v WHERE v.onboarding_case_id=l.cid AND v.l0_code IN ('OB_ADS_LIVE','SYSTEM_EXTERNAL_ADS_LIVE') AND v.event_time>l.lost_at))::int AS revived
     FROM lostev l JOIN onboarding_cases c ON c.id=l.cid JOIN agents a ON a.id=c.assigned_to
     WHERE (l.lost_at AT TIME ZONE 'Asia/Kolkata')::date<=${to}::date
-    GROUP BY a.name ORDER BY lost DESC,a.name
+    GROUP BY a.name HAVING COUNT(*) FILTER (WHERE c.current_status IN ('lost','ads_live'))>0 ORDER BY lost DESC,a.name
   `;
   const ro:any=reopenedRows[0]||{};
   const pct=(a:number,b:number)=>b?Math.round(a*1000/b)/10:0;
