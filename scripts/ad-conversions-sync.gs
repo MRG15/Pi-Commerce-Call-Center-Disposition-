@@ -1,7 +1,7 @@
 /**
- * Pi Commerce — Onboardings_Updated_List ("New" tab) -> CSM workspace conversations
+ * Pi Commerce — SMB Ad Performance Data ("All customers" tab) -> CSM workspace conversations
  *
- * Paste into the "Onboardings_Updated_List" sheet: Extensions → Apps Script. Then:
+ * Paste into the "SMB Ad Performance Data" sheet: Extensions → Apps Script. Then:
  *   1. Project Settings → Script Properties → add
  *        PI_COMMERCE_AD_CONVERSIONS_SYNC_URL  https://pi-commerce-call-center-disposition.vercel.app/api/internal/ad-conversions-sync
  *        PI_COMMERCE_SUB_RAW_SYNC_SECRET      (the same secret the Sub Raw / CSM syncs use)
@@ -9,10 +9,11 @@
  *      every day at about 9:40 AM, alongside the CSM sync (set the Apps Script time zone to
  *      Asia/Kolkata in Project Settings). Run syncAdConversions any time to push the latest numbers.
  *
- * Reads, by header name, CustID, Ad_ID (the Ads ID — not Meta_AD_ID), Ad_Creative_Name and
- * Conversations from the "New" tab. The portal matches each ad on Ad_ID = AdsRun Raw "Ads ID".
+ * Reads, by header name, customer_id, adsrun_ad_id (the AdsRun "Ads ID" — NOT ad_id, which is Meta's
+ * ID), ad_creative_name and conversations from the "All customers" tab. The portal matches each ad on
+ * adsrun_ad_id = AdsRun Raw "Ads ID". Replaces the older sync on the Onboardings_Updated_List sheet.
  */
-const ADCONV_SHEET = 'New';
+const ADCONV_SHEET = 'All customers';
 const ADCONV_BATCH = 1000;
 
 function setupAdConversionsTrigger() {
@@ -31,11 +32,11 @@ function syncAdConversions() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ADCONV_SHEET);
   if (!sheet) throw new Error('Tab "' + ADCONV_SHEET + '" not found');
   const values = sheet.getDataRange().getDisplayValues();
-  // "Ad_ID" / "Ad ID" / "ad_id" all match; Meta_AD_ID is a different column and is not used.
+  // adsrun_ad_id only: this sheet's ad_id column is Meta's ad ID and does not match the portal.
   const header = values[0].map(h => String(h).trim().toLowerCase().replace(/[\s-]+/g, '_'));
   const col = names => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
-  const c = { cust: col(['custid', 'customer_id']), ad: col(['ad_id']), name: col(['ad_creative_name', 'ad_name']), conv: col(['conversations']) };
-  if (c.cust < 0 || c.ad < 0 || c.conv < 0) throw new Error('Missing CustID / Ad_ID / Conversations headers');
+  const c = { cust: col(['custid', 'customer_id']), ad: col(['adsrun_ad_id']), name: col(['ad_creative_name', 'ad_name']), conv: col(['conversations']) };
+  if (c.cust < 0 || c.ad < 0 || c.conv < 0) throw new Error('Missing customer_id / adsrun_ad_id / conversations headers');
   const rows = [];
   for (let r = 1; r < values.length; r++) {
     const v = values[r];
