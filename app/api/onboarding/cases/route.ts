@@ -22,6 +22,10 @@ export async function GET(req:Request){
       c.sub_status,c.sub_cancelled_at::text AS sub_cancelled_at,c.sub_credits::float8 AS sub_credits,c.sub_plan_name,c.sold_by_employee_code,c.sub_plan_amount::float8 AS sub_plan_amount,c.sub_expiry_date,c.last_completed_stage,c.reopened_at,c.reopen_reason,
       (SELECT so.rank FROM onboarding_stage_order so WHERE so.stage=c.last_completed_stage) AS stage_rank,
       a.name AS assigned_name,
+      -- Refunded: a refund was logged and the merchant has not asked to continue since (refund WhatsApp tap
+      -- reopens the case). Refunded cases sit in an admin-only bucket; onboarders never see them.
+      EXISTS(SELECT 1 FROM onboarding_events rf WHERE rf.onboarding_case_id=c.id AND rf.l0_code='OB_REFUND_PROCESSED'
+        AND (c.reopened_at IS NULL OR rf.event_time>c.reopened_at)) AS refunded,
       -- Sold by the Merchant Lending team or a Premium accounts e-code (merchant_lending_ecodes): shown in yellow so onboarding prioritises it.
       EXISTS(SELECT 1 FROM merchant_lending_ecodes ml WHERE ml.employee_code=btrim(c.sold_by_employee_code)) AS merchant_lending,
       m.merchant_name,m.phone_number,m.category,m.sub_category,
@@ -59,6 +63,8 @@ export async function GET(req:Request){
     LEFT JOIN agents a ON a.id=c.assigned_to
     LEFT JOIN merchant_information m ON m.customer_id=c.customer_id AND m.active=TRUE
     WHERE (${all} OR c.assigned_to=${user.id}::uuid)
+      AND (${all} OR NOT EXISTS(SELECT 1 FROM onboarding_events rf WHERE rf.onboarding_case_id=c.id AND rf.l0_code='OB_REFUND_PROCESSED'
+        AND (c.reopened_at IS NULL OR rf.event_time>c.reopened_at)))
       AND (${scope}='all' OR c.current_status='open')
       AND (${!filterByAgent} OR c.assigned_to=${assignedTo||null}::uuid)
       AND (
