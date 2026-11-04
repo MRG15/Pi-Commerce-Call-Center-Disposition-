@@ -33,7 +33,7 @@ export async function POST(req:Request){
   const assigned=await assignUnassignedLeads(sql);
   // Rides on this 5-minute trigger: yesterday's onboarding WhatsApps that had no phone go out from 9 AM.
   await retryOnboardingNoPhone(sql).catch((e:any)=>console.error('onboarding no-phone retry failed',e));
-  // Also the clock for once-a-day jobs: the 8:30 AM onboarding backlog rebalance.
+  // Also the clock for once-a-day jobs: the 8:30 AM language rebalance.
   await runDailyJobs(sql).catch((e:any)=>console.error('daily jobs failed',e));
   // And for the CSM WhatsApps at 12 PM (once per day's snapshot), after the response so the
   // sheet script isn't kept waiting while they send.

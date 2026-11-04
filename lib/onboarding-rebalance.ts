@@ -90,6 +90,7 @@ export async function runDailyJobs(sql:any){
   if(!claim[0]) return;
   const result:any={};
   try{ result.language=await rebalanceLanguageCases(sql); }catch(e:any){ result.language={error:String(e?.message||e)}; console.error('language rebalance failed',e); }
-  try{ Object.assign(result,await rebalanceOnboardingBacklog(sql)); }catch(e:any){ result.error=String(e?.message||e); console.error('backlog rebalance failed',e); }
+  // The live → backlog team rebalance (rebalanceOnboardingBacklog) is switched off; only the
+  // language rebalance runs.
   await sql`UPDATE daily_jobs SET result=${sql.json(result)} WHERE job='onboarding_backlog_rebalance' AND run_date=${todayIst()}::date`;
 }
