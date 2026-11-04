@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'crypto';
 import { NextResponse,after } from 'next/server';
 import { db } from '@/lib/db';
 import { retryOnboardingNoPhone,ensureCsmWaRun } from '@/lib/wa';
+import { runDailyJobs } from '@/lib/onboarding-rebalance';
 import { syncPicomDnd } from '@/lib/clevertap-dnd';
 import { runWinbackWa } from '@/lib/winback-wa';
 import { ingestLeads,linkLeadsToCustomers,linkAfterMerchantSync,assignUnassignedLeads } from '@/lib/leadgen';
@@ -32,8 +33,8 @@ export async function POST(req:Request){
   const assigned=await assignUnassignedLeads(sql);
   // Rides on this 5-minute trigger: yesterday's onboarding WhatsApps that had no phone go out from 9 AM.
   await retryOnboardingNoPhone(sql).catch((e:any)=>console.error('onboarding no-phone retry failed',e));
-  // The 8:30 AM onboarding backlog / language rebalance (runDailyJobs) is switched off: cases stay
-  // with whoever they were assigned to.
+  // Also the clock for once-a-day jobs: the 8:30 AM language rebalance.
+  await runDailyJobs(sql).catch((e:any)=>console.error('daily jobs failed',e));
   // And for the CSM WhatsApps at 12 PM (once per day's snapshot), after the response so the
   // sheet script isn't kept waiting while they send.
   after(async()=>{await ensureCsmWaRun(sql).catch((e:any)=>console.error('csm whatsapp error',e));});
