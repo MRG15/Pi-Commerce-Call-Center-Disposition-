@@ -171,7 +171,7 @@ export async function GET(req:Request){
     FROM onboarding_events WHERE source_type='revival_call' AND event_date BETWEEN ${from}::date AND ${to}::date
   `)[0]||{};
   // Lost case revival per case owner, matching the portal's buckets (no overlap):
-  //   Lost     — cases Lost now (the Lost tab)
+  //   Lost     — cases Lost now (the Lost tab; refunded cases excluded)
   //   Called   — of those, given a revival call in the period
   //   Revived  — cases once Lost that are Ads Live now, gone live in the period
   const revivalByAgent=await sql`
@@ -187,6 +187,9 @@ export async function GET(req:Request){
         AND EXISTS(SELECT 1 FROM onboarding_events v WHERE v.onboarding_case_id=l.cid AND v.l0_code IN ('OB_ADS_LIVE','SYSTEM_EXTERNAL_ADS_LIVE') AND v.event_time>l.lost_at))::int AS revived
     FROM lostev l JOIN onboarding_cases c ON c.id=l.cid JOIN agents a ON a.id=c.assigned_to
     WHERE (l.lost_at AT TIME ZONE 'Asia/Kolkata')::date<=${to}::date
+      -- Refunded cases (admin-only Refunded tab) are not Lost for revival.
+      AND NOT EXISTS(SELECT 1 FROM onboarding_events rf WHERE rf.onboarding_case_id=c.id AND rf.l0_code='OB_REFUND_PROCESSED'
+        AND (c.reopened_at IS NULL OR rf.event_time>c.reopened_at))
     GROUP BY a.name HAVING COUNT(*) FILTER (WHERE c.current_status IN ('lost','ads_live'))>0 ORDER BY lost DESC,a.name
   `;
   // New case progress per case owner: cases received in the period (as Cases Received), and where they
