@@ -252,7 +252,13 @@ function syncSubRawOnboarding_(dryRun) {
     /**
      * Ad data from AdsRun Raw: no row there = no ad run (0 ads, no first ad date, 0 impressions / spend).
      */
-    const adsRow = adsByCustomer[customerId];
+    // Outlets: from 2026-10-25, each MID of a Cust ID is sent as its own row (one onboarding case per
+    // outlet). Older subscriptions stay one row per Cust ID.
+    const rowMid = optionalIdx.mid >= 0 ? String(values[r][optionalIdx.mid] == null ? '' : values[r][optionalIdx.mid]).trim() : '';
+    const key = rowMid && subFirstDate >= '2026-10-25' ? customerId + '|' + rowMid : customerId;
+
+    // An outlet row uses only that MID's ads (AdsRun Raw MID column); otherwise the merchant's.
+    const adsRow = key !== customerId && adsByCustomer.byMid ? adsByCustomer.byMid[rowMid] : adsByCustomer[customerId];
 
     const firstAdDate = adsRow ? adsRow.firstAdDate : '';
 
@@ -317,11 +323,6 @@ function syncSubRawOnboarding_(dryRun) {
       continue;
     }
 
-
-    // Outlets: from 2026-10-25, each MID of a Cust ID is sent as its own row (one onboarding case per
-    // outlet). Older subscriptions stay one row per Cust ID.
-    const rowMid = optionalIdx.mid >= 0 ? String(values[r][optionalIdx.mid] == null ? '' : values[r][optionalIdx.mid]).trim() : '';
-    const key = rowMid && subFirstDate >= '2026-10-25' ? customerId + '|' + rowMid : customerId;
 
     deduped[key] = {
 
@@ -688,6 +689,10 @@ function readAdsRunTotals_(ss, failed) {
   let adsIdCol = firstHeader_(head, ['ads_id', 'ad_id', 'adsid', 'adid']);
   if (adsIdCol < 0 && head.length > 20) adsIdCol = 20;
   const clientCol = firstHeader_(head, ['client_id', 'clientid']);
+  // Per-outlet totals when AdsRun Raw has a MID column (outlet cases, one per MID).
+  const midCol = firstHeader_(head, ['mid', 'merchant_mid', 'merchant_id']);
+  const byMid = midCol >= 0 ? {} : null;
+  Object.defineProperty(out, 'byMid', { value: byMid, enumerable: false });
   const clientToCust = {};
   for (let r = 1; r < values.length; r++) {
     const id = cleanId_(values[r][col.custId]);
@@ -700,11 +705,16 @@ function readAdsRunTotals_(ss, failed) {
     if (reason) t.failReason = reason;
     // A failed ad that never delivered is not an ad run.
     if (reason && impressions === 0 && spend === 0) continue;
-    t.ads++;
     const d = normalizeSheetDate_(values[r][col.firstDate]);
-    if (d && (!t.firstAdDate || d < t.firstAdDate)) t.firstAdDate = d;
-    t.impressions += impressions;
-    t.spend += spend;
+    const add = function(x) {
+      x.ads++;
+      if (d && (!x.firstAdDate || d < x.firstAdDate)) x.firstAdDate = d;
+      x.impressions += impressions;
+      x.spend += spend;
+    };
+    add(t);
+    const rm = byMid ? cleanId_(values[r][midCol]) : '';
+    if (rm) add(byMid[rm] || (byMid[rm] = { ads: 0, firstAdDate: '', impressions: 0, spend: 0, failReason: '' }));
   }
   // Failed ads that never reached AdsRun Raw: merchant through meta_failed_ads user_id = Client_ID.
   Object.keys(failed.byClient).forEach(function(cl) {
