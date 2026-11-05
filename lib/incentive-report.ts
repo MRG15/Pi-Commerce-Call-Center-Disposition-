@@ -44,7 +44,10 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
   const earnsSales=teams.length?(p:string,d:string)=>{const s=teamStateOn(teams,p,'sales',d);return !s||!s.member||s.incentive;}:undefined;
   // Ads Live cases credited to the case's assignee; externally-live (Sub Raw) cases never count.
   const adsLive=await sql`
-    SELECT (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date::text AS date,a.name AS person,c.customer_id
+    SELECT (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date::text AS date,a.name AS person,c.customer_id,
+      -- Outlet cases (several MIDs under one Cust ID) name their outlet.
+      CASE WHEN c.mid IS NOT NULL AND EXISTS(SELECT 1 FROM onboarding_cases o WHERE o.customer_id=c.customer_id AND o.id<>c.id)
+        THEN c.mid END AS outlet_mid
     FROM onboarding_cases c JOIN agents a ON a.id=c.assigned_to
     WHERE c.ads_live_at IS NOT NULL
       AND (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${from}::date AND ${to}::date
@@ -124,7 +127,7 @@ export async function buildIncentiveReport(sql:any,from:string,to:string){
   for(const d of planDaily) raw.push({section:'Seller daily plan incentive (from 1 Oct)',date:d.date,person:d.person,detail:`Silver ${d.silver} · Gold ${d.gold} · Platinum ${d.platinum}`,count:d.silver+d.gold+d.platinum,incentive:d.pay});
   for(const w of seller.weekly) raw.push({section:'Seller weekly bonus (to 30 Sep)',date:w.weekStart,weekEnd:w.weekEnd,person:w.person,detail:w.plan,count:w.sales,incentive:w.pay});
   for(const w of revenueWeeks) raw.push({section:'Seller weekly revenue incentive (from 1 Oct)',date:w.activeFrom,weekEnd:w.activeTo,person:w.person,detail:`${w.role}${w.teamLead?' · TL '+w.teamLead:''} · slabs ₹${w.slabPay} + TL team share ₹${w.teamShare}`,count:w.sales,amount:round(w.revenue),incentive:round(w.slabPay+w.teamShare)});
-  for(const c of adsLive) raw.push({section:'Ads live case',date:c.date,person:c.person,customer:String(c.customer_id||'')});
+  for(const c of adsLive) raw.push({section:'Ads live case',date:c.date,person:c.person,customer:String(c.customer_id||'')+(c.outlet_mid?` · outlet MID ${c.outlet_mid}`:'')});
   for(const o of onboarder) if(o.cases>0) raw.push({section:'Ads live daily incentive',date:o.date,person:o.person,detail:o.plan,count:o.cases,incentive:o.casePay});
   const eligibleOb=(p:string,d:string)=>earnsOnboarding?earnsOnboarding(p,d):isMember(ONBOARDER_ROSTER,p,d);
   for(const t of [...topUps.map((x:any)=>({date:x.date,person:x.person,amount:Number(x.amount),customerId:String(x.customer_id||''),note:'',kind:String(x.kind||'Top-up')})),...BACKFILLED_TOP_UPS.map(b=>({...b,kind:'Top-up'}))]){

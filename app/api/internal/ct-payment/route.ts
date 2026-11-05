@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
+import { southFromCt,routeSouthernCases } from '@/lib/language-routing';
 import { db } from '@/lib/db';
 import { PLANS } from '@/lib/plans';
 import { currentUserAccess } from '@/lib/workspace-access';
@@ -72,12 +73,16 @@ function normalize(item:any){
   const employeeCode=val(pick(srcs,['employee_code','employeeCode','event_label4']));
   const category=val(pick(srcs,['category','event_category','payload_event_category']))?.toLowerCase()||null;
   const action=val(pick(srcs,['action','event_action','payload_event_action']))?.toLowerCase()||null;
+  // Location for real-time language routing (whichever CT sends).
+  const state=val(pick(srcs,['state','State','merchant_state']));
+  const pin=val(pick(srcs,['pincode','pin_code','zipcode','pin']));
+  const city=val(pick(srcs,['city','City','merchant_city']));
   const at=eventTime(pick(srcs,['event_time','eventTime','ts','timestamp']))||new Date();
   // Only a subscription payment can open a case or set who sold it; top-ups, upgrades and
   // other payments are stored for the record. Category/action are checked when CT sends them.
   const isSubscription=flow==='subscribe'&&(!category||category==='pic_subscription')&&(!action||action==='payment_success');
-  return {customerId,mid,flow,plan,amount,employeeCode,category,action,isSubscription,at,
-    dedupeKey:[customerId||`mid:${mid}`,flow||'',plan||'',amount??'',istDay(at)].join('|'),raw:item};
+  return {customerId,mid,flow,plan,amount,employeeCode,category,action,isSubscription,at,state,pin,city,
+    dedupeKey:[customerId||`mid:${mid}`,...(customerId&&mid?[mid]:[]),flow||'',plan||'',amount??'',istDay(at)].join('|'),raw:item};
 }
 
 export async function POST(req:Request){
@@ -97,7 +102,7 @@ export async function POST(req:Request){
   const items:any[]=Array.isArray(body)?body:Array.isArray(body.profiles)?body.profiles:Array.isArray(body.events)?body.events:[body];
   const rows=items.map(normalize).filter(Boolean) as NonNullable<ReturnType<typeof normalize>>[];
   const sql=db();
-  let stored=0,created=0;
+  let stored=0,created=0,southern=0;
   for(const r of rows){
     // Only a MID: use the Cust ID the portal already knows for it (AdsRun Raw, earlier CT events).
     if(!r.customerId&&r.mid){
@@ -151,12 +156,13 @@ export async function POST(req:Request){
         // Same equal rotation as every new onboarding case.
         const roster=await loadOnboardingRoster(tx);
         const target=roster.length?takeNextOnboarder(roster):await pickOnboarder();
+        const loc=southFromCt(r.state,r.pin,r.city);
         if(target){
           const saleDate=istDay(r.at);
           await tx`INSERT INTO customers(customer_id) VALUES(${r.customerId}) ON CONFLICT (customer_id) DO NOTHING`;
           const c=await tx`
-            INSERT INTO onboarding_cases(customer_id,mid,source_type,sale_date,assigned_to,assigned_at,last_activity_at,sold_by_employee_code,created_by_ct,rotation_agent_id,sub_plan_name)
-            VALUES(${r.customerId},${r.mid},'historical_import',${saleDate}::date,${target.id}::uuid,now(),NULL,${r.employeeCode},TRUE,${target.id}::uuid,${planName})
+            INSERT INTO onboarding_cases(customer_id,mid,source_type,sale_date,assigned_to,assigned_at,last_activity_at,sold_by_employee_code,created_by_ct,rotation_agent_id,sub_plan_name,sub_state,sub_south)
+            VALUES(${r.customerId},${r.mid},'historical_import',${saleDate}::date,${target.id}::uuid,now(),NULL,${r.employeeCode},TRUE,${target.id}::uuid,${planName},${loc?.label??null},${loc?.south??null})
             RETURNING id
           `;
           await tx`
@@ -164,12 +170,14 @@ export async function POST(req:Request){
             VALUES(${c[0].id}::uuid,${r.customerId},1,'assignment','CleverTap','SYSTEM_ASSIGNED','Assigned',
               ${`Assigned to ${target.name}: reported by CleverTap${r.employeeCode?` (employee ${r.employeeCode})`:''}`})
           `;
-          action='created'; created++;
+          action='created'; created++; if(loc?.south) southern++;
         }
       }
       await tx`UPDATE ct_payment_events SET case_action=${action} WHERE id=${ins[0].id}`;
     });
   }
+  // Southern merchants (CT state / PIN / city) go to the language team now; Sub Raw re-checks next day.
+  if(southern) await routeSouthernCases(sql).catch((e:any)=>console.error('ct language routing failed',e));
   return NextResponse.json({ok:true,received:items.length,stored,casesCreated:created,duplicates:rows.length-stored,skipped:items.length-rows.length});
 }
 

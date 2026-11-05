@@ -1,10 +1,10 @@
 import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { loadOnboardingRoster,takeNextOnboarder } from '@/lib/onboarding';
+import { loadOnboardingRoster,takeNextOnboarder,pickOnboarder } from '@/lib/onboarding';
 import { linkCtPayments } from '@/lib/ct';
 import { PLANS } from '@/lib/plans';
-import { regionOf,routeSouthernCases } from '@/lib/language-routing';
+import { regionOf,routeSouthernCases,undoWrongCityRouting } from '@/lib/language-routing';
 
 type SourceRow = {
   customerId?: unknown;
@@ -500,6 +500,8 @@ export async function POST(req:Request){
 
   // Southern cases (from the communication address just stored) go to the language team once.
   if(!dryRun){
+    try{ (summary as any).cityRoutingUndone=await undoWrongCityRouting(sql,async()=>(await pickOnboarder()) as any); }
+    catch(e:any){ console.error('city routing check failed',e); }
     try{ (summary as any).languageRouting=await routeSouthernCases(sql); }
     catch(e:any){ console.error('language routing failed',e); (summary as any).languageRouting={error:String(e?.message||e)}; }
   }
