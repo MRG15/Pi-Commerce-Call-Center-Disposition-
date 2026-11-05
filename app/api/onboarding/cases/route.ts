@@ -22,13 +22,22 @@ export async function GET(req:Request){
       c.sub_status,c.sub_cancelled_at::text AS sub_cancelled_at,c.sub_credits::float8 AS sub_credits,c.sub_plan_name,c.sold_by_employee_code,c.sub_plan_amount::float8 AS sub_plan_amount,c.sub_expiry_date,c.last_completed_stage,c.reopened_at,c.reopen_reason,
       (SELECT so.rank FROM onboarding_stage_order so WHERE so.stage=c.last_completed_stage) AS stage_rank,
       a.name AS assigned_name,
+      -- Outlets: a merchant with several MIDs has one case per outlet (db/044).
+      c.mid,(SELECT count(*)::int FROM onboarding_cases o WHERE o.customer_id=c.customer_id) AS outlet_count,
+      (SELECT count(*)::int FROM onboarding_cases o WHERE o.customer_id=c.customer_id AND o.created_at<=c.created_at) AS outlet_no,
+      -- Not called today or yesterday (IST): temporary "Not called last 2 days" tag.
+      NOT EXISTS(SELECT 1 FROM onboarding_events nc WHERE nc.onboarding_case_id=c.id
+        AND nc.source_type IN ('new_event','historical_import','revival_call')
+        AND nc.event_time>=((now() AT TIME ZONE 'Asia/Kolkata')::date-1)::timestamp AT TIME ZONE 'Asia/Kolkata') AS not_called_2d,
       -- Refunded: a refund was logged and the merchant has not asked to continue since (refund WhatsApp tap
       -- reopens the case). Refunded cases sit in an admin-only bucket; onboarders never see them.
       EXISTS(SELECT 1 FROM onboarding_events rf WHERE rf.onboarding_case_id=c.id AND rf.l0_code='OB_REFUND_PROCESSED'
         AND (c.reopened_at IS NULL OR rf.event_time>c.reopened_at)) AS refunded,
       -- Sold by the Merchant Lending team or a Premium accounts e-code (merchant_lending_ecodes): shown in yellow so onboarding prioritises it.
       EXISTS(SELECT 1 FROM merchant_lending_ecodes ml WHERE ml.employee_code=btrim(c.sold_by_employee_code)) AS merchant_lending,
-      m.merchant_name,m.phone_number,m.category,m.sub_category,
+      -- An outlet case shows that outlet's own name (AdsRun, by MID).
+      COALESCE(CASE WHEN c.mid IS NOT NULL AND EXISTS(SELECT 1 FROM onboarding_cases o2 WHERE o2.customer_id=c.customer_id AND o2.id<>c.id)
+        THEN (SELECT ma.merchant_name FROM merchant_ads ma WHERE ma.mid=c.mid AND ma.merchant_name IS NOT NULL LIMIT 1) END,m.merchant_name) AS merchant_name,m.phone_number,m.category,m.sub_category,
       GREATEST(0,(
         CASE WHEN ${filterByDate} THEN ${to||null}::date ELSE (now() AT TIME ZONE 'Asia/Kolkata')::date END
         - COALESCE(c.sale_date,(c.created_at AT TIME ZONE 'Asia/Kolkata')::date)

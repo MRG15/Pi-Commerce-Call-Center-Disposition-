@@ -81,6 +81,12 @@ function checkAdsLive(c:any,row:NormalizedRow,cutoffDate:string):LiveCheck{
   return 'OK';
 }
 
+// Outlet cases (db/044): from this subscription date on, a Sub Raw row with a MID is its own case, so a
+// merchant with several outlets (MIDs) under one Cust ID gets one case per outlet. Older rows keep the
+// one-case-per-Cust-ID behaviour, so history does not change.
+const OUTLETS_FROM='2026-10-25';
+const outletMid=(r:NormalizedRow)=>r.mid&&r.subFirstDate>=OUTLETS_FROM?r.mid:null;
+
 function sameSecret(a:string,b:string){
   const aa=Buffer.from(a); const bb=Buffer.from(b);
   return aa.length===bb.length && timingSafeEqual(aa,bb);
@@ -171,7 +177,7 @@ export async function POST(req:Request){
     if(!row){ invalidRows.push(Number(input[i]?.sourceRow)||i+1); continue; }
     // Sub Raw is authoritative. Ignore subscriptions newer than the requested T-1 cutoff.
     if(row.subFirstDate>cutoffDate) continue;
-    deduped.set(row.customerId,row);
+    deduped.set(outletMid(row)?`${row.customerId}|${outletMid(row)}`:row.customerId,row);
   }
 
   const sql=db();
@@ -258,16 +264,38 @@ export async function POST(req:Request){
 
     await sql.begin(async tx=>{
       await tx`SELECT pg_advisory_xact_lock(hashtext(${row.customerId}))`;
-      const existing=await tx`
-        SELECT c.id,c.current_status,c.ads_live_at,c.assigned_to,
+      const mid=outletMid(row);
+      const pick=(where:any)=>tx`
+        SELECT c.id,c.customer_id,c.mid,c.current_status,c.ads_live_at,c.assigned_to,
           (c.ads_live_at AT TIME ZONE 'Asia/Kolkata')::date::text AS ads_live_day,
           EXISTS (SELECT 1 FROM onboarding_events e WHERE e.onboarding_case_id=c.id AND e.l0_code='SYSTEM_EXTERNAL_ADS_LIVE') AS has_external
         FROM onboarding_cases c
-        WHERE c.customer_id=${row.customerId}
+        WHERE ${where}
         ORDER BY c.created_at ASC
         LIMIT 1
         FOR UPDATE OF c
       `;
+      let existing:any[];
+      if(mid){
+        // This outlet's own case (it may sit under another Cust ID if CleverTap reported a different one) …
+        existing=await pick(tx`c.mid=${mid}`);
+        if(existing[0]&&existing[0].customer_id!==row.customerId){
+          const was=existing[0].customer_id;
+          await tx`INSERT INTO customers(customer_id) VALUES(${row.customerId}) ON CONFLICT (customer_id) DO NOTHING`;
+          await tx`UPDATE onboarding_cases SET customer_id=${row.customerId},updated_at=now() WHERE id=${existing[0].id}`;
+          await tx`UPDATE onboarding_events SET customer_id=${row.customerId} WHERE onboarding_case_id=${existing[0].id}`;
+          const n=(await tx`SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM onboarding_events WHERE onboarding_case_id=${existing[0].id}`)[0].n;
+          await tx`INSERT INTO onboarding_events(onboarding_case_id,customer_id,attempt_number,source_type,source_sheet,source_row,l0_code,l0_label_snapshot,remark)
+            VALUES(${existing[0].id},${row.customerId},${n},'system','Sub Raw',${row.sourceRow},'SYSTEM_OUTLET_MOVED','Outlet linked',
+              ${`MID ${mid} belongs to Cust ID ${row.customerId} in Sub Raw (CleverTap had reported Cust ID ${was}). Case moved under ${row.customerId} as an outlet.`})`;
+        }
+        // … else the merchant's case that has no MID yet takes this one …
+        if(!existing[0]){
+          existing=await pick(tx`c.customer_id=${row.customerId} AND c.mid IS NULL`);
+          if(existing[0]) await tx`UPDATE onboarding_cases SET mid=${mid} WHERE id=${existing[0].id}`;
+        }
+        // … else it is a new outlet: a new case below.
+      }else existing=await pick(tx`c.customer_id=${row.customerId}`);
       const c:any=existing[0]||null;
 
       if(!c){
@@ -276,10 +304,10 @@ export async function POST(req:Request){
         if(isLiveAsOfCutoff){
           const created=await tx`
             INSERT INTO onboarding_cases(
-              customer_id,source_type,sale_date,current_l0,current_status,last_activity_at,ads_live_at,closed_at
+              customer_id,mid,source_type,sale_date,current_l0,current_status,last_activity_at,ads_live_at,closed_at
             )
             VALUES(
-              ${row.customerId},'historical_import',${row.subFirstDate}::date,'Externally Ads Live','ads_live',now(),
+              ${row.customerId},${mid},'historical_import',${row.subFirstDate}::date,'Externally Ads Live','ads_live',now(),
               (${row.firstAdDate}::date::timestamp AT TIME ZONE 'Asia/Kolkata'),
               (${row.firstAdDate}::date::timestamp AT TIME ZONE 'Asia/Kolkata')
             )
@@ -303,10 +331,10 @@ export async function POST(req:Request){
           const target=takeNextOnboarder(roster);
           const created=await tx`
             INSERT INTO onboarding_cases(
-              customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at,rotation_agent_id
+              customer_id,mid,source_type,sale_date,assigned_to,assigned_at,last_activity_at,rotation_agent_id
             )
             VALUES(
-              ${row.customerId},'historical_import',${row.subFirstDate}::date,${target.id}::uuid,now(),NULL,${target.id}::uuid
+              ${row.customerId},${mid},'historical_import',${row.subFirstDate}::date,${target.id}::uuid,now(),NULL,${target.id}::uuid
             )
             RETURNING id
           `;
@@ -453,7 +481,7 @@ export async function POST(req:Request){
   }
 
   // Sub Raw fields on every matching case (pills, sorting, stage filter on the onboarding screen).
-  const subFields=[...deduped.values()].filter(r=>r.subFieldsKnown).map(r=>({customer_id:r.customerId,status:r.subscriptionStatus,
+  const subFields=[...deduped.values()].filter(r=>r.subFieldsKnown).map(r=>({customer_id:r.customerId,mid:outletMid(r),status:r.subscriptionStatus,
     cancelled_at:r.cancelledAt,credits:r.credits,stage:r.lastCompletedStage,plan_known:r.planKnown,plan:r.planName,amount:r.planAmount,expiry_known:r.expiryKnown,expiry:r.expiryDate,
     fail_known:r.adFailKnown,fail:r.adFailReason,region_known:r.regionKnown,state:r.subState,south:r.subSouth}));
   if(!dryRun&&subFields.length){
@@ -464,8 +492,8 @@ export async function POST(req:Request){
         sub_expiry_date=CASE WHEN x.expiry_known THEN x.expiry::date ELSE c.sub_expiry_date END,
         ad_fail_reason=CASE WHEN x.fail_known THEN x.fail ELSE c.ad_fail_reason END,
         sub_state=CASE WHEN x.region_known THEN x.state ELSE c.sub_state END,sub_south=CASE WHEN x.region_known THEN x.south ELSE c.sub_south END,sub_synced_at=now()
-      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,status text,cancelled_at text,credits numeric,stage text,plan_known boolean,plan text,amount numeric,expiry_known boolean,expiry text,fail_known boolean,fail text,region_known boolean,state text,south boolean)
-      WHERE c.customer_id=x.customer_id
+      FROM jsonb_to_recordset(${sql.json(subFields)}::jsonb) AS x(customer_id text,mid text,status text,cancelled_at text,credits numeric,stage text,plan_known boolean,plan text,amount numeric,expiry_known boolean,expiry text,fail_known boolean,fail text,region_known boolean,state text,south boolean)
+      WHERE c.customer_id=x.customer_id AND (x.mid IS NULL OR c.mid=x.mid)
     `;
   }
   (summary as any).subFieldsUpdated=dryRun?0:subFields.length;

@@ -318,7 +318,12 @@ function syncSubRawOnboarding_(dryRun) {
     }
 
 
-    deduped[customerId] = {
+    // Outlets: from 2026-10-25, each MID of a Cust ID is sent as its own row (one onboarding case per
+    // outlet). Older subscriptions stay one row per Cust ID.
+    const rowMid = optionalIdx.mid >= 0 ? String(values[r][optionalIdx.mid] == null ? '' : values[r][optionalIdx.mid]).trim() : '';
+    const key = rowMid && subFirstDate >= '2026-10-25' ? customerId + '|' + rowMid : customerId;
+
+    deduped[key] = {
 
       customerId: customerId,
 
@@ -340,23 +345,23 @@ function syncSubRawOnboarding_(dryRun) {
 
     if (optionalIdx.communicationAddress >= 0) {
       const addr = values[r][optionalIdx.communicationAddress];
-      deduped[customerId].communicationAddress = String(addr == null ? '' : addr).trim().slice(0, 1000);
+      deduped[key].communicationAddress = String(addr == null ? '' : addr).trim().slice(0, 1000);
     }
 
     if (optionalIdx.mid >= 0) {
-      deduped[customerId].mid = String(values[r][optionalIdx.mid] == null ? '' : values[r][optionalIdx.mid]).trim();
+      deduped[key].mid = String(values[r][optionalIdx.mid] == null ? '' : values[r][optionalIdx.mid]).trim();
     }
 
     if (optionalIdx.subscriptionStatus >= 0) {
       const row = values[r];
-      deduped[customerId].subscriptionStatus = String(row[optionalIdx.subscriptionStatus] == null ? '' : row[optionalIdx.subscriptionStatus]).trim().toUpperCase();
-      deduped[customerId].cancelledAt = optionalIdx.cancelledAt >= 0 ? normalizeSheetDate_(row[optionalIdx.cancelledAt]) || '' : '';
-      deduped[customerId].credits = optionalIdx.credits >= 0 ? String(row[optionalIdx.credits] == null ? '' : row[optionalIdx.credits]).trim() : '';
-      deduped[customerId].lastCompletedStage = optionalIdx.lastCompletedStage >= 0 ? String(row[optionalIdx.lastCompletedStage] == null ? '' : row[optionalIdx.lastCompletedStage]).trim() : '';
-      if (optionalIdx.expiryDate >= 0) deduped[customerId].expiryDate = normalizeSheetDate_(row[optionalIdx.expiryDate]) || '';
+      deduped[key].subscriptionStatus = String(row[optionalIdx.subscriptionStatus] == null ? '' : row[optionalIdx.subscriptionStatus]).trim().toUpperCase();
+      deduped[key].cancelledAt = optionalIdx.cancelledAt >= 0 ? normalizeSheetDate_(row[optionalIdx.cancelledAt]) || '' : '';
+      deduped[key].credits = optionalIdx.credits >= 0 ? String(row[optionalIdx.credits] == null ? '' : row[optionalIdx.credits]).trim() : '';
+      deduped[key].lastCompletedStage = optionalIdx.lastCompletedStage >= 0 ? String(row[optionalIdx.lastCompletedStage] == null ? '' : row[optionalIdx.lastCompletedStage]).trim() : '';
+      if (optionalIdx.expiryDate >= 0) deduped[key].expiryDate = normalizeSheetDate_(row[optionalIdx.expiryDate]) || '';
       if (optionalIdx.planName >= 0) {
-        deduped[customerId].planName = String(row[optionalIdx.planName] == null ? '' : row[optionalIdx.planName]).trim();
-        deduped[customerId].planAmount = optionalIdx.planAmount >= 0 ? String(row[optionalIdx.planAmount] == null ? '' : row[optionalIdx.planAmount]).trim() : '';
+        deduped[key].planName = String(row[optionalIdx.planName] == null ? '' : row[optionalIdx.planName]).trim();
+        deduped[key].planAmount = optionalIdx.planAmount >= 0 ? String(row[optionalIdx.planAmount] == null ? '' : row[optionalIdx.planAmount]).trim() : '';
       }
     }
   }
