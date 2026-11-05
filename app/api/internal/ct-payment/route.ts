@@ -125,7 +125,18 @@ export async function POST(req:Request){
         return;
       }
       const planName=r.plan&&r.plan in PLANS?PLANS[r.plan as keyof typeof PLANS].label:null;
-      const existing=await tx`SELECT id,sold_by_employee_code FROM onboarding_cases WHERE customer_id=${r.customerId} ORDER BY created_at LIMIT 1 FOR UPDATE`;
+      // Outlets (db/044): a MID that already has a case uses it. A subscription for a new MID of a
+      // merchant whose case already has a different MID opens a new outlet case; a case with no MID
+      // yet takes this one.
+      let existing:any[]=r.mid?await tx`SELECT id,sold_by_employee_code,mid FROM onboarding_cases WHERE mid=${r.mid} LIMIT 1 FOR UPDATE`:[];
+      if(!existing[0]){
+        const main=await tx`SELECT id,sold_by_employee_code,mid FROM onboarding_cases WHERE customer_id=${r.customerId} ORDER BY created_at LIMIT 1 FOR UPDATE`;
+        const newOutlet=Boolean(main[0]&&r.mid&&main[0].mid&&main[0].mid!==r.mid&&r.isSubscription);
+        if(main[0]&&!newOutlet){
+          existing=main;
+          if(r.mid&&!main[0].mid&&r.isSubscription) await tx`UPDATE onboarding_cases SET mid=${r.mid} WHERE id=${main[0].id}::uuid`;
+        }
+      }
       let action='ignored';
       if(existing[0]){
         action='existing';
@@ -144,8 +155,8 @@ export async function POST(req:Request){
           const saleDate=istDay(r.at);
           await tx`INSERT INTO customers(customer_id) VALUES(${r.customerId}) ON CONFLICT (customer_id) DO NOTHING`;
           const c=await tx`
-            INSERT INTO onboarding_cases(customer_id,source_type,sale_date,assigned_to,assigned_at,last_activity_at,sold_by_employee_code,created_by_ct,rotation_agent_id,sub_plan_name)
-            VALUES(${r.customerId},'historical_import',${saleDate}::date,${target.id}::uuid,now(),NULL,${r.employeeCode},TRUE,${target.id}::uuid,${planName})
+            INSERT INTO onboarding_cases(customer_id,mid,source_type,sale_date,assigned_to,assigned_at,last_activity_at,sold_by_employee_code,created_by_ct,rotation_agent_id,sub_plan_name)
+            VALUES(${r.customerId},${r.mid},'historical_import',${saleDate}::date,${target.id}::uuid,now(),NULL,${r.employeeCode},TRUE,${target.id}::uuid,${planName})
             RETURNING id
           `;
           await tx`
