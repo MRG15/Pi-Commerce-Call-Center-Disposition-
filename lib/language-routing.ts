@@ -34,6 +34,38 @@ export function regionOf(raw:unknown):{state:string|null;south:boolean|null}{
   return {state:null,south:null};
 }
 
+// Southern cities and districts (Karnataka, Kerala, Tamil Nadu, Andhra Pradesh, Telangana,
+// Puducherry) for CleverTap's city field: real-time routing; Sub Raw's address re-checks next day.
+const SOUTH_CITIES=new Set(['bengaluru','bangalore','mysuru','mysore','mangaluru','mangalore','hubballi','hubli','dharwad','belagavi','belgaum','kalaburagi','gulbarga','davanagere','davangere','ballari','bellary','vijayapura','bijapur','shivamogga','shimoga','tumakuru','tumkur','raichur','bidar','hosapete','hospet','udupi','hassan','mandya','chitradurga','kolar','chikkamagaluru','chikmagalur','bagalkot','gadag','haveri','koppal','yadgir','chamarajanagar','karwar','madikeri','ramanagara','chikkaballapur','kochi','cochin','ernakulam','thiruvananthapuram','trivandrum','kozhikode','calicut','thrissur','trichur','kollam','quilon','kannur','alappuzha','alleppey','palakkad','palghat','malappuram','kottayam','kasaragod','pathanamthitta','idukki','wayanad','thiruvalla','kayamkulam','chennai','madras','coimbatore','madurai','tiruchirappalli','trichy','tiruchi','salem','tirunelveli','tiruppur','tirupur','erode','vellore','thoothukudi','tuticorin','dindigul','thanjavur','tanjore','hosur','nagercoil','kanchipuram','kancheepuram','karur','namakkal','cuddalore','kumbakonam','tiruvannamalai','pollachi','rajapalayam','sivakasi','krishnagiri','dharmapuri','villupuram','viluppuram','pudukkottai','ramanathapuram','sivaganga','virudhunagar','theni','nagapattinam','tiruvarur','perambalur','ariyalur','ooty','udhagamandalam','chengalpattu','tiruvallur','ranipet','tenkasi','kallakurichi','tirupattur','hyderabad','secunderabad','warangal','hanamkonda','karimnagar','nizamabad','khammam','ramagundam','mahbubnagar','mahabubnagar','nalgonda','adilabad','suryapet','siddipet','miryalaguda','jagtial','mancherial','sangareddy','medak','kamareddy','vikarabad','wanaparthy','nagarkurnool','jangaon','bhongir','kothagudem','visakhapatnam','vizag','vijayawada','guntur','nellore','kurnool','tirupati','rajahmundry','rajamahendravaram','kakinada','kadapa','cuddapah','anantapur','anantapuramu','eluru','ongole','vizianagaram','machilipatnam','tenali','proddatur','chittoor','hindupur','srikakulam','bhimavaram','madanapalle','guntakal','dharmavaram','gudivada','narasaraopet','tadepalligudem','amaravati','nandyal','puducherry','pondicherry','karaikal','mahe','yanam']);
+
+// South flag from CleverTap's state / pincode / city (whichever is sent); null when unknown.
+export function southFromCt(state:string|null,pin:string|null,city:string|null):{label:string;south:boolean}|null{
+  if(state) return {label:state,south:SOUTH.includes(norm(state))};
+  const p=String(pin||'').replace(/\D/g,'');
+  if(p.length===6) return {label:`PIN ${p}`,south:p[0]==='5'||p[0]==='6'};
+  if(city){ const n=norm(city); return {label:city,south:SOUTH_CITIES.has(n)||SOUTH_CITIES.has(n.split(' ')[0])}; }
+  return null;
+}
+
+// Second check at the Sub Raw sync: a case routed on CleverTap's city whose communication address is
+// not southern goes back to the regular rotation (unless it has since been tagged Language Barrier).
+export async function undoWrongCityRouting(sql:any,pick:()=>Promise<{id:string;name:string}|null>){
+  const cases=await sql`
+    SELECT c.id,c.customer_id,c.assigned_to,c.sub_state FROM onboarding_cases c
+    WHERE c.lb_city_routed AND c.sub_south IS FALSE AND c.sub_synced_at IS NOT NULL AND c.current_status='open'
+      AND c.language_barrier_at IS NULL
+      AND NOT EXISTS(SELECT 1 FROM onboarding_events lb WHERE lb.onboarding_case_id=c.id AND (lb.l1_code='OB_LANGUAGE_BARRIER' OR lb.l2_code='OB_LANGUAGE_BARRIER'))
+  `;
+  let moved=0;
+  for(const c of cases){
+    const to=await pick();
+    if(!to) break;
+    if(await moveCase(sql,c,to,`Reassigned to ${to.name}: Sub Raw address (${c.sub_state||'not southern'}) is not a southern state, so the CleverTap city routing is undone`)) moved++;
+    await sql`UPDATE onboarding_cases SET lb_city_routed=FALSE WHERE id=${c.id}`;
+  }
+  return {moved};
+}
+
 // SQL condition for a language case (c = onboarding_cases).
 export function languageCaseSql(sql:any){
   return sql`(c.language_barrier_at IS NOT NULL
@@ -81,7 +113,7 @@ export async function routeSouthernCases(sql:any){
   if(!team.length) return {routed:0,note:'No language onboarders ticked'};
   const ids=new Set(team.map(t=>t.id));
   const cases=await sql`
-    SELECT c.id,c.customer_id,c.assigned_to,c.sub_state FROM onboarding_cases c
+    SELECT c.id,c.customer_id,c.assigned_to,c.sub_state,c.sub_synced_at FROM onboarding_cases c
     WHERE c.current_status='open' AND c.sub_south IS TRUE AND c.lb_routed_at IS NULL
       AND c.created_at>=${LB_ROUTING_FROM}::timestamptz
     ORDER BY c.created_at
@@ -92,7 +124,8 @@ export async function routeSouthernCases(sql:any){
       await sql`UPDATE onboarding_cases SET lb_routed_at=now() WHERE id=${c.id}`; kept++; continue;
     }
     const to=fewest(team);
-    const ok=await moveCase(sql,c,to,`Reassigned to ${to.name}: southern state (${c.sub_state||'address'}), language barrier routing at the Sub Raw sync`,true);
+    const ok=await moveCase(sql,c,to,`Reassigned to ${to.name}: southern state (${c.sub_state||'address'}), language barrier routing${c.sub_synced_at?' at the Sub Raw sync':' from CleverTap (real time)'}`,true);
+    if(ok&&!c.sub_synced_at) await sql`UPDATE onboarding_cases SET lb_city_routed=TRUE WHERE id=${c.id}`;
     if(ok){ to.open++; routed++; }
   }
   return {routed,kept};
