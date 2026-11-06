@@ -11,7 +11,8 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
   const {id}=await params; const sql=db();
   const rows=await sql`
     SELECT c.*,a.name AS assigned_name,COALESCE(CASE WHEN c.mid IS NOT NULL AND EXISTS(SELECT 1 FROM onboarding_cases o2 WHERE o2.customer_id=c.customer_id AND o2.id<>c.id)
-        THEN (SELECT ma.merchant_name FROM merchant_ads ma WHERE ma.mid=c.mid AND ma.merchant_name IS NOT NULL LIMIT 1) END,m.merchant_name) AS merchant_name,m.phone_number,m.category,m.sub_category
+        THEN COALESCE((SELECT mo.merchant_name FROM merchant_outlets mo WHERE mo.mid=c.mid),
+          (SELECT ma.merchant_name FROM merchant_ads ma WHERE ma.mid=c.mid AND ma.merchant_name IS NOT NULL LIMIT 1)) END,m.merchant_name) AS merchant_name,m.phone_number,m.category,m.sub_category
     FROM onboarding_cases c
     LEFT JOIN agents a ON a.id=c.assigned_to
     LEFT JOIN merchant_information m ON m.customer_id=c.customer_id AND m.active=TRUE
