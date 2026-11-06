@@ -8,6 +8,7 @@ type MerchantRow = {
   phone_number?: unknown;
   category?: unknown;
   sub_category?: unknown;
+  mid?: unknown;
 };
 
 function clean(v: unknown) {
@@ -32,9 +33,13 @@ export async function POST(req: Request) {
 
   const input: MerchantRow[] = Array.isArray(body?.rows) ? body.rows : [];
   const byCustomer = new Map<string, any>();
+  // Optional MID per row: each outlet's own name (merchant_outlets), for outlet cases.
+  const outlets = new Map<string, any>();
   for (const row of input) {
     const customerId = clean(row?.customer_id);
     if (!customerId) continue;
+    const mid = clean(row?.mid);
+    if (mid && /^[A-Za-z0-9]{6,}$/.test(mid)) outlets.set(mid, { mid, customer_id: customerId, merchant_name: clean(row?.merchant_name) });
     byCustomer.set(customerId, {
       customer_id: customerId,
       merchant_name: clean(row?.merchant_name),
@@ -103,6 +108,13 @@ export async function POST(req: Request) {
       return Number(count?.n || 0);
     });
 
+    if (outlets.size) {
+      await sql`
+        INSERT INTO merchant_outlets(mid,customer_id,merchant_name,synced_at)
+        SELECT x.mid,x.customer_id,x.merchant_name,now() FROM jsonb_to_recordset(${sql.json(Array.from(outlets.values()))}::jsonb) AS x(mid text,customer_id text,merchant_name text)
+        ON CONFLICT (mid) DO UPDATE SET customer_id=EXCLUDED.customer_id,merchant_name=EXCLUDED.merchant_name,synced_at=now()
+      `.catch((e) => console.error('merchant outlets sync failed', e));
+    }
     // New merchant phones: give Lead Gen leads still without a Cust ID theirs.
     const leadsLinked = await linkAfterMerchantSync(sql).catch((e) => { console.error('lead linking after merchant sync failed', e); return 0; });
     return NextResponse.json({ ok: true, received: rows.length, activeMerchants: result, syncedAt: startedAt, leadsLinked });

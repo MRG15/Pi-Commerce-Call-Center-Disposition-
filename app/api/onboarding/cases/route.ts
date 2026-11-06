@@ -37,7 +37,8 @@ export async function GET(req:Request){
       EXISTS(SELECT 1 FROM merchant_lending_ecodes ml WHERE ml.employee_code=btrim(c.sold_by_employee_code)) AS merchant_lending,
       -- An outlet case shows that outlet's own name (AdsRun, by MID).
       COALESCE(CASE WHEN c.mid IS NOT NULL AND EXISTS(SELECT 1 FROM onboarding_cases o2 WHERE o2.customer_id=c.customer_id AND o2.id<>c.id)
-        THEN (SELECT ma.merchant_name FROM merchant_ads ma WHERE ma.mid=c.mid AND ma.merchant_name IS NOT NULL LIMIT 1) END,m.merchant_name) AS merchant_name,m.phone_number,m.category,m.sub_category,
+        THEN COALESCE((SELECT mo.merchant_name FROM merchant_outlets mo WHERE mo.mid=c.mid),
+          (SELECT ma.merchant_name FROM merchant_ads ma WHERE ma.mid=c.mid AND ma.merchant_name IS NOT NULL LIMIT 1)) END,m.merchant_name) AS merchant_name,m.phone_number,m.category,m.sub_category,
       GREATEST(0,(
         CASE WHEN ${filterByDate} THEN ${to||null}::date ELSE (now() AT TIME ZONE 'Asia/Kolkata')::date END
         - COALESCE(c.sale_date,(c.created_at AT TIME ZONE 'Asia/Kolkata')::date)
