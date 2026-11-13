@@ -34,6 +34,8 @@ export async function GET(){
   const inLeadgen=new Set(lg.map((r:any)=>String(r.agent_id)));
   const lbr=(await sql`SELECT to_regclass('public.onboarding_lb_roster') IS NOT NULL AS ok`)[0]?.ok?await sql`SELECT agent_id FROM onboarding_lb_roster`:[];
   const inLanguage=new Set(lbr.map((r:any)=>String(r.agent_id)));
+  const nr=(await sql`SELECT to_regclass('public.onboarding_night_roster') IS NOT NULL AS ok`)[0]?.ok?await sql`SELECT agent_id FROM onboarding_night_roster`:[];
+  const inNight=new Set(nr.map((r:any)=>String(r.agent_id)));
   const weightOf=new Map(weights.map((w:any)=>[String(w.agent_id),Number(w.weight)]));
   const members:any={sales:[],onboarding:[],csm:[]};
   for(const p of people){
@@ -56,7 +58,7 @@ export async function GET(){
         row.role=r&&r.role!=='NONE'?r.role:null; row.teamLeadId=r?.team_lead_id?String(r.team_lead_id):null; row.teamLead=r?.team_lead_name||null;
         if(nr) row.upcomingRole={date:nr.effective_from,role:nr.role,teamLead:nr.team_lead_name||null};
       }
-      if(team==='onboarding'){ row.rotation=inRotation.has(id); row.language=inLanguage.has(id); }
+      if(team==='onboarding'){ row.rotation=inRotation.has(id); row.language=inLanguage.has(id); row.night=inNight.has(id); }
       if(team==='sales') row.leadgen=inLeadgen.has(id);
       if(team==='csm') row.share=weightOf.get(id)??0;
       members[team].push(row);
@@ -138,6 +140,11 @@ export async function POST(req:Request){
         if(team!=='onboarding') throw new Error('TEAM');
         if(b.on) await tx`INSERT INTO onboarding_lb_roster(agent_id) VALUES(${agentId}::uuid) ON CONFLICT (agent_id) DO NOTHING`;
         else await tx`DELETE FROM onboarding_lb_roster WHERE agent_id=${agentId}::uuid`;
+      }else if(action==='night'){
+        // Night shift: gets new cases created 7 PM – 9 AM IST, in its own round robin (lib/onboarding.ts).
+        if(team!=='onboarding') throw new Error('TEAM');
+        if(b.on) await tx`INSERT INTO onboarding_night_roster(agent_id) VALUES(${agentId}::uuid) ON CONFLICT (agent_id) DO NOTHING`;
+        else await tx`DELETE FROM onboarding_night_roster WHERE agent_id=${agentId}::uuid`;
       }else if(action==='share'){
         if(team!=='csm') throw new Error('TEAM');
         const w=Math.round(Number(b.share));

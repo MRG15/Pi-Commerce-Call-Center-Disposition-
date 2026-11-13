@@ -35,14 +35,27 @@ export async function pickOnboarder(preferredId?:string|null){
 // picked the fewest times since the roster started (ties: longest since their last pick). Counted
 // on rotation_agent_id, so cases an admin later moves still count for the person first picked.
 // Existing cases are never moved.
+// Night shift: from 7 PM to 9 AM IST, new cases go round robin to the onboarders ticked "Night shift"
+// (onboarding_night_roster) instead of the day roster. With nobody ticked, the day roster is used.
+export const NIGHT_FROM_HOUR=19, NIGHT_TO_HOUR=9;
+export function isNightShift(now=new Date()){const h=new Date(now.getTime()+330*60000).getUTCHours();return h>=NIGHT_FROM_HOUR||h<NIGHT_TO_HOUR;}
+
 export async function loadOnboardingRoster(sql:any):Promise<{id:string;name:string;count:number;last:number}[]>{
-  const ok=await sql`SELECT to_regclass('public.onboarding_roster') IS NOT NULL AS ok`;
+  if(isNightShift()){
+    const night=await loadRoster(sql,'onboarding_night_roster');
+    if(night.length) return night;
+  }
+  return loadRoster(sql,'onboarding_roster');
+}
+
+async function loadRoster(sql:any,table:'onboarding_roster'|'onboarding_night_roster'){
+  const ok=await sql`SELECT to_regclass(${'public.'+table}) IS NOT NULL AS ok`;
   if(!ok[0]?.ok) return [];
   const rows=await sql`
     WITH r AS (
       -- Counted since the rotation last gained someone, so a newcomer starts level, not behind.
-      SELECT a.id,a.name,(SELECT max(added_at) FROM onboarding_roster) AS since
-      FROM onboarding_roster o JOIN agents a ON a.id=o.agent_id
+      SELECT a.id,a.name,(SELECT max(added_at) FROM ${sql(table)}) AS since
+      FROM ${sql(table)} o JOIN agents a ON a.id=o.agent_id
       JOIN workspace_access w ON w.agent_id=a.id AND w.workspace='onboarding'
       WHERE a.active=TRUE
     )
