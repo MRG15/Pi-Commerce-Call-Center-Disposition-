@@ -327,6 +327,30 @@ export async function ensureCsmWaRun(sql:any){
   catch(e){await sql`UPDATE csm_sync_runs SET wa_templates=NULL WHERE id=${claim[0].id}`;throw e;}
 }
 
+// Requests already answered: a disposition was logged in that workspace after the merchant asked
+// (e.g. a Paytm callback request synced hours after the call that answered it). Cleared on every load
+// of the Req Call Back panes.
+export async function resolveAnsweredRequests(sql:any){
+  await sql`UPDATE wa_messages m SET resolved_at=now()
+    WHERE m.clicked_at IS NOT NULL AND m.resolved_at IS NULL AND m.clicked_at>now()-interval '60 days' AND (
+      (m.workspace='onboarding' AND EXISTS(SELECT 1 FROM onboarding_events e WHERE e.customer_id=m.customer_id
+        AND e.source_type IN ('new_event','historical_import','revival_call') AND e.event_time>m.clicked_at))
+      OR (m.workspace='csm' AND EXISTS(SELECT 1 FROM onboarding_events e WHERE e.customer_id=m.customer_id
+        AND e.source_type='customer_success_followup' AND e.event_time>m.clicked_at))
+      OR (m.workspace='seller' AND EXISTS(SELECT 1 FROM calls c WHERE ((m.customer_id IS NOT NULL AND c.customer_id=m.customer_id)
+        OR (m.lead_id IS NOT NULL AND c.lead_id=m.lead_id)) AND c.created_at>m.clicked_at)))`;
+}
+
+// One-time WhatsApp blasts: rows queued straight into wa_messages with source_ref 'blast:…' (e.g. a
+// list of merchants an admin asked for). Sent from the 5-minute lead sync between 9 AM and 8 PM IST.
+export async function sendQueuedBlasts(sql:any){
+  const h=new Date(Date.now()+330*60000).getUTCHours();
+  if(h<9||h>=20) return 0;
+  const rows=await sql`SELECT id FROM wa_messages WHERE status='queued' AND source_ref LIKE 'blast:%' AND created_at>now()-interval '3 days' ORDER BY id LIMIT 60`;
+  await sendQueuedWa(sql,rows.map((r:any)=>Number(r.id)));
+  return rows.length;
+}
+
 // A new disposition by the workspace clears that merchant's open callback requests there.
 export async function resolveCallbackRequests(sql:any,workspace:WaWorkspace,customerId:string|null,leadId?:string|null){
   if(customerId) await sql`UPDATE wa_messages SET resolved_at=now() WHERE workspace=${workspace} AND customer_id=${customerId} AND clicked_at IS NOT NULL AND resolved_at IS NULL`;

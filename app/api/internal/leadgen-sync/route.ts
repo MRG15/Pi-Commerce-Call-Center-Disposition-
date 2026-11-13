@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'crypto';
 import { NextResponse,after } from 'next/server';
 import { db } from '@/lib/db';
-import { retryOnboardingNoPhone,ensureCsmWaRun } from '@/lib/wa';
+import { retryOnboardingNoPhone,ensureCsmWaRun,sendQueuedBlasts } from '@/lib/wa';
 import { runDailyJobs } from '@/lib/onboarding-rebalance';
 import { syncPicomDnd } from '@/lib/clevertap-dnd';
 import { runWinbackWa } from '@/lib/winback-wa';
@@ -33,6 +33,8 @@ export async function POST(req:Request){
   const assigned=await assignUnassignedLeads(sql);
   // Rides on this 5-minute trigger: yesterday's onboarding WhatsApps that had no phone go out from 9 AM.
   await retryOnboardingNoPhone(sql).catch((e:any)=>console.error('onboarding no-phone retry failed',e));
+  // One-time WhatsApp blasts queued by admins (lib/wa.ts sendQueuedBlasts).
+  await sendQueuedBlasts(sql).catch((e:any)=>console.error('wa blast failed',e));
   // Also the clock for once-a-day jobs: the 8:30 AM language rebalance.
   await runDailyJobs(sql).catch((e:any)=>console.error('daily jobs failed',e));
   // And for the CSM WhatsApps at 12 PM (once per day's snapshot), after the response so the

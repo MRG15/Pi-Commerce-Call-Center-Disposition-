@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { currentUserAccess,canAccess,isWorkspaceAdmin } from '@/lib/workspace-access';
 import { csmRole } from '@/lib/csm';
+import { resolveAnsweredRequests } from '@/lib/wa';
 
 // Open "Request a callback" clicks for a workspace's Req Call Back pane.
 //   seller      — the seller who logged the disposition that sent the message
@@ -13,6 +14,7 @@ export async function GET(req:Request){
   if(!user) return NextResponse.json({error:'Unauthenticated'},{status:401});
   const ws=new URL(req.url).searchParams.get('workspace')||'';
   const sql=db();
+  await resolveAnsweredRequests(sql).catch((e:any)=>console.error('resolve answered requests failed',e));
   if(ws==='seller'){
     if(!canAccess(user,'seller')) return NextResponse.json({error:'Seller access required'},{status:403});
     const all=isWorkspaceAdmin(user,'seller');
