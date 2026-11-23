@@ -175,3 +175,33 @@ export async function reopenForCallback(sql:any,customerId:string,reason:'callba
     return true;
   });
 }
+
+// "Request a callback" from a WhatsApp campaign sent outside the CRM (their own template on the Pi Commerce
+// platform). Only the phone is needed; the team comes from our data unless the sender says otherwise:
+//   no Cust ID / no onboarding case          -> Sales (not subscribed)
+//   case with ads live, or a CSM assigned    -> CSM
+//   case, ads not live yet                   -> Onboarding
+// Then exactly as a Paytm callback request (owner first, round robin, 24h merge, lost case reopens),
+// shown in Req Call Back with the tag "📍 WhatsApp".
+export async function whatsappTeam(sql:any,customerId:string|null):Promise<'sales'|'onboarding'|'csm'>{
+  if(!customerId) return 'sales';
+  const r=(await sql`SELECT
+      EXISTS(SELECT 1 FROM onboarding_cases WHERE customer_id=${customerId}) AS has_case,
+      EXISTS(SELECT 1 FROM onboarding_cases WHERE customer_id=${customerId} AND (current_status='ads_live' OR ads_live_at IS NOT NULL))
+        OR EXISTS(SELECT 1 FROM csm_assignments WHERE customer_id=${customerId}) AS live`)[0];
+  return r.live?'csm':r.has_case?'onboarding':'sales';
+}
+
+export async function whatsappCallback(sql:any,b:{phone?:unknown;customer_id?:unknown;name?:unknown;campaign?:unknown;request_id?:unknown;route_to?:unknown}){
+  const phone=phone10(b.phone);
+  if(!phone) return {ok:false as const,error:'phone is required (10-digit Indian mobile number)'};
+  const custId=String(b.customer_id??'').trim().replace(/\.0$/,'');
+  const customerId=await customerFor(sql,/^\d{5,}$/.test(custId)?custId:null,null,phone);
+  const forced=routeTo(b.route_to);
+  const team=forced?(forced==='seller'?'sales':forced):await whatsappTeam(sql,customerId);
+  const id='wa:'+(s(b.request_id)||randomBytes(9).toString('base64url'));
+  const now=new Date(Date.now()+19800000).toISOString().slice(0,19).replace('T',' '); // IST, as the sheet sends it
+  const result=await ingestPaytmCallbacks(sql,[{id,route_to:team,cust_id:customerId,phone_number:phone,business_name:b.name,
+    requested_at:now,stage:'whatsapp',reason:b.campaign}]);
+  return {ok:true as const,team,customer_id:customerId,request_id:id,...result};
+}

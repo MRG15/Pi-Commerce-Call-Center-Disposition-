@@ -1,15 +1,19 @@
 import { db } from '@/lib/db';
-import { reopenForCallback } from '@/lib/paytm-callbacks';
+import { reopenForCallback,whatsappCallback } from '@/lib/paytm-callbacks';
 
 // "Request a callback" link from the WhatsApp templates (/cb/<callback_token>). Public: the
 // merchant opens it from WhatsApp. Records the request for the workspace's Req Call Back pane;
 // clicking again later (after the team has followed up) raises a new request.
 export const dynamic='force-dynamic';
 
-export default async function CallbackRequestPage({params}:{params:Promise<{token:string}>}){
+export default async function CallbackRequestPage({params,searchParams}:{params:Promise<{token:string}>;searchParams:Promise<{c?:string}>}){
   const {token}=await params;
   let ok=false;
-  if(/^[A-Za-z0-9_-]{8,64}$/.test(token)){
+  // ponytail: a bare phone (/cb/9876543210?c=campaign) is a WhatsApp campaign sent outside the CRM; tokens are
+  // 16 random base64url chars, never 10/12 digits. Public, so anyone with a number can raise a request (merged 24h).
+  if(/^(91)?\d{10}$/.test(token)){
+    try{ok=(await whatsappCallback(db(),{phone:token,campaign:(await searchParams).c})).ok;}catch{ok=false;}
+  }else if(/^[A-Za-z0-9_-]{8,64}$/.test(token)){
     try{
       const rows=await db()`
         UPDATE wa_messages
