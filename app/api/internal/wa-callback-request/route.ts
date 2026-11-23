@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 import { whatsappCallback } from '@/lib/paytm-callbacks';
 
 // "Request a callback" from a WhatsApp campaign the team sends themselves. One JSON object per tap:
-//   { "phone": "9876543210", "customer_id"?, "name"?, "campaign"?, "request_id"?, "route_to"?: "Sales"|"Onboarding"|"CSM" }
+//   { "customer_id"?: "123456", "mid"?, "phone"?,  (at least one) "name"?, "campaign"?, "request_id"?, "route_to"?: "Sales"|"Onboarding"|"CSM" }
 // Routing and assignment: lib/paytm-callbacks.ts (whatsappCallback). Auth: header x-callback-secret = WA_CALLBACK_SECRET.
 function sameSecret(a:string,b:string){const aa=Buffer.from(a),bb=Buffer.from(b);return aa.length===bb.length&&timingSafeEqual(aa,bb);}
 

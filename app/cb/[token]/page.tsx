@@ -9,19 +9,21 @@ export const dynamic='force-dynamic';
 export default async function CallbackRequestPage({params,searchParams}:{params:Promise<{token:string}>;searchParams:Promise<{c?:string}>}){
   const {token}=await params;
   let ok=false;
-  // ponytail: a bare phone (/cb/9876543210?c=campaign) is a WhatsApp campaign sent outside the CRM; tokens are
-  // 16 random base64url chars, never 10/12 digits. Public, so anyone with a number can raise a request (merged 24h).
-  if(/^(91)?\d{10}$/.test(token)){
-    try{ok=(await whatsappCallback(db(),{phone:token,campaign:(await searchParams).c})).ok;}catch{ok=false;}
-  }else if(/^[A-Za-z0-9_-]{8,64}$/.test(token)){
+  // A WhatsApp campaign sent outside the CRM puts the merchant's Cust ID (digits) or MID (letters + digits)
+  // here instead of a message token: /cb/123456 or /cb/<MID>, optionally ?c=campaign (WhatsApp may encode the
+  // "?" into the value). Tokens are matched first. Public, so anyone with an ID can raise a request (merged 24h).
+  let key=token,campaign:string|undefined;
+  try{const [k,q]=decodeURIComponent(token).split('?');key=k;campaign=(await searchParams).c||new URLSearchParams(q||'').get('c')||undefined;}catch{}
+  if(/^[A-Za-z0-9_-]{3,64}$/.test(key)){
     try{
       const rows=await db()`
         UPDATE wa_messages
         SET clicked_at=CASE WHEN clicked_at IS NULL OR resolved_at IS NOT NULL THEN now() ELSE clicked_at END,
             resolved_at=NULL,click_count=click_count+1
-        WHERE token=${token} RETURNING id,template,customer_id
+        WHERE token=${key} RETURNING id,template,customer_id
       `;
       ok=rows.length>0;
+      if(!ok&&/^[A-Za-z0-9]+$/.test(key)) ok=(await whatsappCallback(db(),/^\d+$/.test(key)?{customer_id:key,campaign}:{mid:key,campaign})).ok;
       // Get ad setup on the refund message: the merchant wants to continue, so their lost case reopens.
       if(rows[0]?.template==='REFUND_NOTICE'&&rows[0].customer_id)
         await reopenForCallback(db(),String(rows[0].customer_id),'refund_callback','Refund WhatsApp',
