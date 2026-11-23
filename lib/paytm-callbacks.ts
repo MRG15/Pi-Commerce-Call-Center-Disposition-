@@ -16,6 +16,7 @@
 //   owner stays, and the round-robin holder can log it.
 //   Only requests from the last 48 hours (the sheet's expiry) are brought in.
 import { randomBytes } from 'crypto';
+import { merchantContact } from './wa';
 
 export const PAYTM_CALLBACK='PAYTM_CALLBACK';
 const DAY=86400000;
@@ -46,6 +47,8 @@ const phone10=(v:unknown)=>{const d=String(v??'').replace(/\.0$/,'').replace(/\D
 async function customerFor(sql:any,custId:string|null,mid:string|null,phone:string|null){
   if(custId) return custId;
   if(mid){
+    const o=await sql`SELECT customer_id FROM merchant_outlets WHERE mid=${mid} LIMIT 1`;
+    if(o[0]) return String(o[0].customer_id);
     const a=await sql`SELECT customer_id FROM merchant_ads WHERE mid=${mid} AND customer_id IS NOT NULL LIMIT 1`;
     if(a[0]) return String(a[0].customer_id);
     const c=await sql`SELECT customer_id FROM ct_payment_events WHERE mid=${mid} AND customer_id IS NOT NULL ORDER BY received_at DESC LIMIT 1`;
@@ -177,7 +180,7 @@ export async function reopenForCallback(sql:any,customerId:string,reason:'callba
 }
 
 // "Request a callback" from a WhatsApp campaign sent outside the CRM (their own template on the Pi Commerce
-// platform). Only the phone is needed; the team comes from our data unless the sender says otherwise:
+// platform). A Cust ID, MID or phone is enough; the team comes from our data unless the sender says otherwise:
 //   no Cust ID / no onboarding case          -> Sales (not subscribed)
 //   case with ads live, or a CSM assigned    -> CSM
 //   case, ads not live yet                   -> Onboarding
@@ -192,11 +195,12 @@ export async function whatsappTeam(sql:any,customerId:string|null):Promise<'sale
   return r.live?'csm':r.has_case?'onboarding':'sales';
 }
 
-export async function whatsappCallback(sql:any,b:{phone?:unknown;customer_id?:unknown;name?:unknown;campaign?:unknown;request_id?:unknown;route_to?:unknown}){
-  const phone=phone10(b.phone);
-  if(!phone) return {ok:false as const,error:'phone is required (10-digit Indian mobile number)'};
+export async function whatsappCallback(sql:any,b:{phone?:unknown;customer_id?:unknown;mid?:unknown;name?:unknown;campaign?:unknown;request_id?:unknown;route_to?:unknown}){
   const custId=String(b.customer_id??'').trim().replace(/\.0$/,'');
-  const customerId=await customerFor(sql,/^\d{5,}$/.test(custId)?custId:null,null,phone);
+  const customerId=await customerFor(sql,/^\d+$/.test(custId)?custId:null,s(b.mid),phone10(b.phone));
+  // Phone from the request, else the merchant's number on record (the agent needs one to call).
+  const phone=phone10(b.phone)||(customerId?phone10((await merchantContact(sql,customerId)).phone):null);
+  if(!customerId&&!phone) return {ok:false as const,error:'Send a known customer_id or mid (or a phone)'};
   const forced=routeTo(b.route_to);
   const team=forced?(forced==='seller'?'sales':forced):await whatsappTeam(sql,customerId);
   const id='wa:'+(s(b.request_id)||randomBytes(9).toString('base64url'));
